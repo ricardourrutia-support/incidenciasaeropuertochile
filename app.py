@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from io import BytesIO
 from datetime import datetime, date, timedelta
 
@@ -47,24 +46,21 @@ def try_parse_date_any(x):
     return pd.to_datetime(x, errors="coerce", dayfirst=True)
 
 def _norm_colname(s: str) -> str:
-    """
-    Normalización agresiva para comparar columnas:
-    - lower
-    - quita espacios, guiones, puntos
-    - normaliza paréntesis
-    """
     s = "" if s is None else str(s)
+    # limpia espacios raros
+    s = s.replace("\u00A0", " ").replace("\u2007", " ").replace("\u202F", " ")
     s = s.strip().lower()
-    s = s.replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u").replace("ñ","n")
-    for ch in [" ", ".", "-", "_", "\n", "\t", "\r"]:
+    # acentos
+    s = (s.replace("á","a").replace("é","e").replace("í","i")
+           .replace("ó","o").replace("ú","u").replace("ñ","n"))
+    # separadores
+    for ch in [" ", ".", "-", "_", "\n", "\t", "\r", ":", ";", ","]:
         s = s.replace(ch, "")
+    # paréntesis
     s = s.replace("(", "").replace(")", "")
     return s
 
 def find_col(df: pd.DataFrame, candidates: list[str]):
-    """
-    Busca columna en df por equivalencias normalizadas.
-    """
     colmap = {_norm_colname(c): c for c in df.columns}
     for cand in candidates:
         key = _norm_colname(cand)
@@ -75,22 +71,21 @@ def find_col(df: pd.DataFrame, candidates: list[str]):
 def read_csv_flexible(file):
     return pd.read_csv(file)
 
-def read_excel_detect_header(file, sheet_name=0, must_have=("RUT",), max_scan_rows=40):
+def _read_excel_raw_noheader(file, sheet_name=0):
     """
-    Lee XLS/XLSX detectando fila de encabezado automáticamente.
-    Busca la primera fila que contenga TODOS los must_have (por comparación normalizada).
+    Lee excel sin header (header=None).
+    Para XLS requiere xlrd; para XLSX usa openpyxl.
     """
-    # leemos sin header
-    try:
-        raw = pd.read_excel(file, sheet_name=sheet_name, header=None, engine=None)
-    except Exception as e:
-        name = getattr(file, "name", "").lower()
-        if name.endswith(".xls"):
-            raise RuntimeError(
-                "No pude leer el archivo .xls. En Streamlit Cloud necesitas xlrd.\n"
-                "Agrega 'xlrd>=2.0.1' en requirements.txt o convierte el archivo a .xlsx."
-            ) from e
-        raise
+    name = getattr(file, "name", "").lower()
+    if name.endswith(".xls"):
+        # xlrd
+        return pd.read_excel(file, sheet_name=sheet_name, header=None, engine="xlrd")
+    else:
+        # xlsx
+        return pd.read_excel(file, sheet_name=sheet_name, header=None, engine="openpyxl")
+
+def read_excel_detect_header_one_row(file, sheet_name=0, must_have=("RUT",), max_scan_rows=50):
+    raw = _read_excel_raw_noheader(file, sheet_name=sheet_name)
 
     def row_has_all(row_vals, must):
         row_keys = {_norm_colname(v) for v in row_vals}
@@ -98,24 +93,116 @@ def read_excel_detect_header(file, sheet_name=0, must_have=("RUT",), max_scan_ro
 
     header_row = None
     for i in range(min(max_scan_rows, len(raw))):
-        vals = raw.iloc[i].tolist()
-        if row_has_all(vals, must_have):
+        if row_has_all(raw.iloc[i].tolist(), must_have):
             header_row = i
             break
 
     if header_row is None:
-        preview = raw.head(12)
-        raise RuntimeError(
-            f"No encontré encabezado con columnas requeridas {must_have}.\n"
-            f"Vista previa primeras filas:\n{preview}"
-        )
+        return None  # no encontrado
 
-    cols = [str(c).strip() for c in raw.iloc[header_row].tolist()]
+    cols = []
+    for c in raw.iloc[header_row].tolist():
+        cc = "" if pd.isna(c) else str(c)
+        cc = cc.replace("\u00A0", " ").replace("\u2007", " ").replace("\u202F", " ").strip()
+        cols.append(cc)
+
     df = raw.iloc[header_row + 1:].copy()
     df.columns = cols
     df = df.dropna(how="all")
     df.columns = [str(c).strip() for c in df.columns]
     return df
+
+def read_excel_detect_header_two_rows(file, sheet_name=0, must_have=("RUT",), max_scan_rows=50):
+    """
+    Caso Asistencia XLS: encabezado en 2 filas (ej. B1+B2 combinadas),
+    datos desde la tercera fila.
+    Estrategia:
+      - busca dos filas consecutivas (i e i+1) donde el encabezado "aplanado"
+        contenga must_have
+      - crea columnas combinando fila i y i+1:
+          col = fila2 si existe, si no fila1; si ambas existen, concatena.
+      - datos comienzan en i+2
+    """
+    raw = _read_excel_raw_noheader(file, sheet_name=sheet_name)
+
+    def build_cols(r1, r2):
+        cols = []
+        for a, b in zip(r1, r2):
+            a = "" if pd.isna(a) else str(a)
+            b = "" if pd.isna(b) else str(b)
+            a = a.replace("\u00A0", " ").strip()
+            b = b.replace("\u00A0", " ").strip()
+
+            if a and b:
+                cols.append(f"{a} {b}".strip())
+            elif b:
+                cols.append(b.strip())
+            else:
+                cols.append(a.strip())
+        # evita columnas vacías
+        cols = [c if c else f"COL_{i+1}" for i, c in enumerate(cols)]
+        return cols
+
+    def has_must(cols, must):
+        keys = {_norm_colname(c) for c in cols}
+        return all(_norm_colname(m) in keys for m in must)
+
+    header_row = None
+    cols_final = None
+    for i in range(min(max_scan_rows, len(raw) - 1)):
+        r1 = raw.iloc[i].tolist()
+        r2 = raw.iloc[i + 1].tolist()
+        cols = build_cols(r1, r2)
+        if has_must(cols, must_have):
+            header_row = i
+            cols_final = cols
+            break
+
+    if header_row is None:
+        return None
+
+    df = raw.iloc[header_row + 2:].copy()  # datos desde la tercera fila del header
+    df.columns = cols_final
+    df = df.dropna(how="all")
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+def read_excel_asistencia_special(file, sheet_name=0):
+    """
+    Para tu caso: encabezado está combinado en B1+B2, datos desde B3.
+    Primero intentamos 2-filas (must_have RUT + Fecha Entrada),
+    si falla, fallback 1-fila.
+    """
+    df = read_excel_detect_header_two_rows(file, sheet_name=sheet_name, must_have=("RUT", "Fecha Entrada"))
+    if df is not None:
+        return df
+    df = read_excel_detect_header_one_row(file, sheet_name=sheet_name, must_have=("RUT", "Fecha Entrada"))
+    if df is not None:
+        return df
+    # último recurso: con solo RUT
+    df = read_excel_detect_header_two_rows(file, sheet_name=sheet_name, must_have=("RUT",))
+    if df is not None:
+        return df
+    df = read_excel_detect_header_one_row(file, sheet_name=sheet_name, must_have=("RUT",))
+    if df is not None:
+        return df
+    raise RuntimeError("No pude detectar encabezado en Asistencia (no encuentro RUT / Fecha Entrada).")
+
+def read_excel_inasistencia_detect(file, sheet_name=0):
+    """
+    Inasistencias suele venir normal (una fila).
+    """
+    df = read_excel_detect_header_one_row(file, sheet_name=sheet_name, must_have=("RUT", "Día"))
+    if df is not None:
+        return df
+    df = read_excel_detect_header_two_rows(file, sheet_name=sheet_name, must_have=("RUT", "Día"))
+    if df is not None:
+        return df
+    # fallback: solo RUT
+    df = read_excel_detect_header_one_row(file, sheet_name=sheet_name, must_have=("RUT",))
+    if df is not None:
+        return df
+    raise RuntimeError("No pude detectar encabezado en Inasistencias (no encuentro RUT / Día).")
 
 def parse_time_only(x):
     if pd.isna(x) or str(x).strip() == "":
@@ -126,21 +213,14 @@ def parse_time_only(x):
     return t.time()
 
 def parse_range_to_times(rng: str):
-    """
-    "7:00:00 - 15:00:00" / "07:00-19:00" -> (time,time)
-    """
     if rng is None or pd.isna(rng):
         return (None, None)
     s = str(rng).strip()
     if "-" not in s:
         return (None, None)
-    parts = s.split("-")
-    if len(parts) < 2:
-        return (None, None)
-    a = parts[0].strip()
-    b = parts[1].strip()
-    ta = pd.to_datetime(a, errors="coerce")
-    tb = pd.to_datetime(b, errors="coerce")
+    a, b = s.split("-", 1)
+    ta = pd.to_datetime(a.strip(), errors="coerce")
+    tb = pd.to_datetime(b.strip(), errors="coerce")
     if pd.isna(ta) or pd.isna(tb):
         return (None, None)
     return (ta.time(), tb.time())
@@ -181,7 +261,6 @@ def style_sheet_table(ws):
 
     ws.freeze_panes = "A2"
 
-    # autosize simple (sin pasarse)
     for col_cells in ws.columns:
         col_letter = col_cells[0].column_letter
         max_len = 10
@@ -196,7 +275,6 @@ def style_sheet_table(ws):
 # =========================
 with st.sidebar:
     st.header("Inputs (nuevo esquema)")
-
     f_asistencia = st.file_uploader("1) Reporte de Asistencia (XLS/XLSX)", type=["xls", "xlsx"])
     f_inasist   = st.file_uploader("2) Reporte de Inasistencias (XLS/XLSX)", type=["xls", "xlsx"])
     f_planif    = st.file_uploader("3) Planificación de Turnos (CSV)", type=["csv"])
@@ -213,18 +291,18 @@ if not all([f_asistencia, f_inasist, f_planif, f_codif]):
 
 
 # =========================
-# Load files (robusto con detección encabezado)
+# Load
 # =========================
 try:
-    df_asist = read_excel_detect_header(f_asistencia, must_have=("RUT", "Fecha Entrada"))
-    df_inas  = read_excel_detect_header(f_inasist,   must_have=("RUT", "Día"))
+    df_asist = read_excel_asistencia_special(f_asistencia)
+    df_inas  = read_excel_inasistencia_detect(f_inasist)
     df_plan  = read_csv_flexible(f_planif)
     df_cod   = read_csv_flexible(f_codif)
 except Exception as e:
     st.error(str(e))
     st.stop()
 
-# strip colnames
+# Strip cols
 df_plan.columns = [str(c).strip() for c in df_plan.columns]
 df_cod.columns  = [str(c).strip() for c in df_cod.columns]
 
@@ -300,7 +378,6 @@ df_pl_long = df_pl_long[(df_pl_long["Fecha_dt"] >= start_dt) & (df_pl_long["Fech
 df_pl_long["Es_Libre"] = df_pl_long["Turno_Cod"].astype(str).str.upper().eq("L")
 df_pl_act = df_pl_long[(df_pl_long["Turno_Cod"] != "") & (~df_pl_long["Es_Libre"])].copy()
 
-# horario planificado
 df_pl_act["Horario_Plan"] = df_pl_act["Turno_Cod"].map(turno_to_hor).fillna("")
 df_pl_act[["PlanStart_t", "PlanEnd_t"]] = df_pl_act["Horario_Plan"].apply(lambda x: pd.Series(parse_range_to_times(x)))
 
@@ -321,11 +398,9 @@ c_hent = find_col(df_asist, ["Hora Entrada", "HoraEntrada"])
 c_fsal = find_col(df_asist, ["Fecha Salida", "FechaSalida"])
 c_hsal = find_col(df_asist, ["Hora Salida", "HoraSalida"])
 
-# Dentro recinto (tu XLS suele venir como "Dentro de Recinto(Entrada)" sin espacios)
 c_rec_in  = find_col(df_asist, ["Dentro del Recinto (Entrada)", "Dentro de Recinto(Entrada)", "DentrodeRecintoEntrada"])
 c_rec_out = find_col(df_asist, ["Dentro del Recinto (Salida)",  "Dentro de Recinto(Salida)",  "DentrodeRecintoSalida"])
 
-# texto base
 c_nombre = find_col(df_asist, ["Nombre"])
 c_pa = find_col(df_asist, ["Primer Apellido", "PrimerApellido"])
 c_sa = find_col(df_asist, ["Segundo Apellido", "SegundoApellido"])
@@ -397,7 +472,6 @@ def planned_hours_for(key: str):
 # =========================
 # Construcción Detalle
 # =========================
-# Motivo -> Clasificación inicial (si existe)
 mot_map = {"-": "Injustificada", "P": "Permiso", "L": "Licencia", "V": "Vacaciones", "C": "Compensado"}
 
 # 1) Asistencia -> incidencias (Marcaje/Turno) por diferencia horas
@@ -408,12 +482,10 @@ for _, r in df_asist.iterrows():
 
     d0 = r["Fecha_base"].date() if not pd.isna(r["Fecha_base"]) else None
 
-    # ventana planificada
     plan_start = combine_date_time(d0, ps) if ps else None
     plan_end   = combine_date_time(d0, pe) if pe else None
     plan_start, plan_end = ensure_overnight(plan_start, plan_end)
 
-    # marca real
     d_in = try_parse_date_any(r.get(c_fent)).date() if c_fent else d0
     t_in = parse_time_only(r.get(c_hent)) if c_hent else None
     d_out = try_parse_date_any(r.get(c_fsal)).date() if c_fsal else d0
@@ -426,7 +498,6 @@ for _, r in df_asist.iterrows():
     horas_trab = round(hours_between(real_start, real_end), 2) if (real_start and real_end) else 0.0
     horas_plan = planned_hours_for(key)
 
-    # si no hay planificación para ese día, no levantamos incidencia (no se puede evaluar)
     if horas_plan <= 0:
         continue
 
@@ -434,7 +505,6 @@ for _, r in df_asist.iterrows():
     if diff < float(min_diff_h):
         continue
 
-    # minutos atraso / salida anticipada (contra ventana planificada)
     min_atraso = 0
     min_salida = 0
     if plan_start and real_start:
@@ -477,6 +547,7 @@ for _, r in df_inas.iterrows():
     key = r["Clave_RUT_Fecha"]
     d0 = r["Fecha_base"].date() if not pd.isna(r["Fecha_base"]) else None
     horas_plan = planned_hours_for(key)
+
     mot = "" if not c_mot_i else str(r.get(c_mot_i)).strip()
     mot_u = mot.upper()
     clas = mot_map.get(mot_u, "Seleccionar")
@@ -506,8 +577,6 @@ for _, r in df_inas.iterrows():
 df_det_in = pd.DataFrame(in_rows)
 
 df_det = pd.concat([df_det_as, df_det_in], ignore_index=True)
-if len(df_det) == 0:
-    st.warning("No hay registros para el periodo/filtros seleccionados (o no hay planificación para evaluar incidencias).")
 
 cols_order = [
     "Fecha", "Nombre", "Primer Apellido", "Segundo Apellido", "RUT",
@@ -612,7 +681,6 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
     wb = Workbook()
     wb.remove(wb.active)
 
-    # Listas
     ws_l = wb.create_sheet("Listas")
     ws_l["A1"] = "Tipo_Incidencia"
     for i, v in enumerate(TIPO_OPTS, start=2):
@@ -622,7 +690,6 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
         ws_l[f"C{i}"] = v
     ws_l.sheet_state = "hidden"
 
-    # Detalle
     ws = wb.create_sheet("Detalle")
     df_out = df_detalle.copy()
     df_out["Fecha"] = pd.to_datetime(df_out["Fecha"], errors="coerce")
@@ -631,12 +698,10 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
         ws.append(r)
     style_sheet_table(ws)
 
-    # fecha corta
     fecha_col = list(df_out.columns).index("Fecha") + 1
     for rr in range(2, ws.max_row + 1):
         ws.cell(rr, fecha_col).number_format = "DD/MM/YYYY"
 
-    # dropdowns
     cols = list(df_out.columns)
     col_tipo = cols.index("Tipo_Incidencia") + 1
     col_clas = cols.index("Clasificación Manual") + 1
@@ -649,7 +714,6 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
     dv_tipo.add(f"{ws.cell(2, col_tipo).coordinate}:{ws.cell(ws.max_row, col_tipo).coordinate}")
     dv_clas.add(f"{ws.cell(2, col_clas).coordinate}:{ws.cell(ws.max_row, col_clas).coordinate}")
 
-    # Resumen (fórmulas)
     ws_r = wb.create_sheet("Resumen")
     ws_r.append(["KPI", "Valor"])
 
@@ -671,7 +735,6 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
         ws_r.append([k, f])
     style_sheet_table(ws_r)
 
-    # KPIs diarios (planificados fijos desde planificación + conteos en Detalle)
     ws_k = wb.create_sheet("KPIs_diarios")
     ws_k.cell(row=1, column=1, value="KPI")
 
