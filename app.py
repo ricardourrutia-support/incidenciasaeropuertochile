@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from io import BytesIO
 from datetime import datetime, date, timedelta
 
@@ -33,7 +34,7 @@ BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 
 # =========================
-# Helpers
+# Helpers - texto / columnas
 # =========================
 def normalize_rut(x) -> str:
     if pd.isna(x):
@@ -47,15 +48,20 @@ def try_parse_date_any(x):
 
 def _norm_colname(s: str) -> str:
     s = "" if s is None else str(s)
-    # limpia espacios raros
+
+    # limpia espacios raros (muy común en XLS)
     s = s.replace("\u00A0", " ").replace("\u2007", " ").replace("\u202F", " ")
+
     s = s.strip().lower()
+
     # acentos
     s = (s.replace("á","a").replace("é","e").replace("í","i")
            .replace("ó","o").replace("ú","u").replace("ñ","n"))
+
     # separadores
     for ch in [" ", ".", "-", "_", "\n", "\t", "\r", ":", ";", ","]:
         s = s.replace(ch, "")
+
     # paréntesis
     s = s.replace("(", "").replace(")", "")
     return s
@@ -68,23 +74,96 @@ def find_col(df: pd.DataFrame, candidates: list[str]):
             return colmap[key]
     return None
 
+def _clean_cell(x):
+    if pd.isna(x):
+        return ""
+    s = str(x)
+    s = s.replace("\u00A0", " ").replace("\u2007", " ").replace("\u202F", " ")
+    return s.strip()
+
+def _ffill_row(values):
+    """Forward-fill horizontal: arregla merges en XLS (solo queda el valor en la primera celda del merge)."""
+    out = []
+    last = ""
+    for v in values:
+        s = _clean_cell(v)
+        if s:
+            last = s
+            out.append(s)
+        else:
+            out.append(last)
+    return out
+
+
+# =========================
+# Helpers - lectura archivos
+# =========================
 def read_csv_flexible(file):
+    # Tu CSV suele venir con separador ','; si no, cámbialo aquí.
     return pd.read_csv(file)
 
 def _read_excel_raw_noheader(file, sheet_name=0):
     """
     Lee excel sin header (header=None).
-    Para XLS requiere xlrd; para XLSX usa openpyxl.
+    XLS requiere xlrd; XLSX usa openpyxl.
     """
     name = getattr(file, "name", "").lower()
     if name.endswith(".xls"):
-        # xlrd
         return pd.read_excel(file, sheet_name=sheet_name, header=None, engine="xlrd")
-    else:
-        # xlsx
-        return pd.read_excel(file, sheet_name=sheet_name, header=None, engine="openpyxl")
+    return pd.read_excel(file, sheet_name=sheet_name, header=None, engine="openpyxl")
 
-def read_excel_detect_header_one_row(file, sheet_name=0, must_have=("RUT",), max_scan_rows=50):
+
+def read_asistencia_b1b2_with_debug(file, sheet_name=0):
+    """
+    CASO ESPECIAL ASISTENCIA:
+    - Encabezado en 2 filas (B1+B2), con merges
+    - Datos comienzan desde B3
+    - Ignora columna A (normalmente vacía por el formato)
+    """
+    raw = _read_excel_raw_noheader(file, sheet_name=sheet_name)
+
+    if len(raw) < 3:
+        raise RuntimeError("Asistencia: el archivo tiene menos de 3 filas, no puedo construir encabezado B1/B2.")
+
+    # Excel row1 y row2 => raw.iloc[0] y raw.iloc[1]
+    row1 = raw.iloc[0].tolist()
+    row2 = raw.iloc[1].tolist()
+
+    # Arregla merges: rellena horizontalmente valores faltantes
+    row1_ff = _ffill_row(row1)
+    row2_ff = _ffill_row(row2)
+
+    # Desde columna B (index 1) hacia la derecha
+    row1_ff = row1_ff[1:]
+    row2_ff = row2_ff[1:]
+
+    # Construcción de columnas: preferir fila2; si ambas, concatena (si no son iguales)
+    cols = []
+    for a, b in zip(row1_ff, row2_ff):
+        if a and b and _norm_colname(a) != _norm_colname(b):
+            cols.append(f"{a} {b}".strip())
+        elif b:
+            cols.append(b)
+        else:
+            cols.append(a)
+
+    cols = [c if c else f"COL_{i+1}" for i, c in enumerate(cols)]
+    cols = [_clean_cell(c) for c in cols]
+
+    # Datos desde fila 3 (index 2) y desde columna B (index 1)
+    df = raw.iloc[2:, 1:].copy()
+    df.columns = cols
+    df = df.dropna(how="all")
+    df.columns = [_clean_cell(c) for c in df.columns]
+
+    return df, raw
+
+
+def read_inasistencia_detect(file, sheet_name=0, max_scan_rows=50):
+    """
+    Inasistencias normalmente: encabezado 1 fila (a veces con filas basura).
+    Detecta una fila que contenga RUT y Día.
+    """
     raw = _read_excel_raw_noheader(file, sheet_name=sheet_name)
 
     def row_has_all(row_vals, must):
@@ -93,117 +172,31 @@ def read_excel_detect_header_one_row(file, sheet_name=0, must_have=("RUT",), max
 
     header_row = None
     for i in range(min(max_scan_rows, len(raw))):
-        if row_has_all(raw.iloc[i].tolist(), must_have):
+        if row_has_all(raw.iloc[i].tolist(), must=("RUT", "Día")) or row_has_all(raw.iloc[i].tolist(), must=("RUT", "Dia")):
             header_row = i
             break
 
     if header_row is None:
-        return None  # no encontrado
+        # fallback: buscar solo RUT
+        for i in range(min(max_scan_rows, len(raw))):
+            if row_has_all(raw.iloc[i].tolist(), must=("RUT",)):
+                header_row = i
+                break
 
-    cols = []
-    for c in raw.iloc[header_row].tolist():
-        cc = "" if pd.isna(c) else str(c)
-        cc = cc.replace("\u00A0", " ").replace("\u2007", " ").replace("\u202F", " ").strip()
-        cols.append(cc)
+    if header_row is None:
+        raise RuntimeError("Inasistencias: no pude detectar encabezado (no encontré RUT / Día).")
 
+    cols = [_clean_cell(c) for c in raw.iloc[header_row].tolist()]
     df = raw.iloc[header_row + 1:].copy()
     df.columns = cols
     df = df.dropna(how="all")
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+    df.columns = [_clean_cell(c) for c in df.columns]
+    return df, raw
 
-def read_excel_detect_header_two_rows(file, sheet_name=0, must_have=("RUT",), max_scan_rows=50):
-    """
-    Caso Asistencia XLS: encabezado en 2 filas (ej. B1+B2 combinadas),
-    datos desde la tercera fila.
-    Estrategia:
-      - busca dos filas consecutivas (i e i+1) donde el encabezado "aplanado"
-        contenga must_have
-      - crea columnas combinando fila i y i+1:
-          col = fila2 si existe, si no fila1; si ambas existen, concatena.
-      - datos comienzan en i+2
-    """
-    raw = _read_excel_raw_noheader(file, sheet_name=sheet_name)
 
-    def build_cols(r1, r2):
-        cols = []
-        for a, b in zip(r1, r2):
-            a = "" if pd.isna(a) else str(a)
-            b = "" if pd.isna(b) else str(b)
-            a = a.replace("\u00A0", " ").strip()
-            b = b.replace("\u00A0", " ").strip()
-
-            if a and b:
-                cols.append(f"{a} {b}".strip())
-            elif b:
-                cols.append(b.strip())
-            else:
-                cols.append(a.strip())
-        # evita columnas vacías
-        cols = [c if c else f"COL_{i+1}" for i, c in enumerate(cols)]
-        return cols
-
-    def has_must(cols, must):
-        keys = {_norm_colname(c) for c in cols}
-        return all(_norm_colname(m) in keys for m in must)
-
-    header_row = None
-    cols_final = None
-    for i in range(min(max_scan_rows, len(raw) - 1)):
-        r1 = raw.iloc[i].tolist()
-        r2 = raw.iloc[i + 1].tolist()
-        cols = build_cols(r1, r2)
-        if has_must(cols, must_have):
-            header_row = i
-            cols_final = cols
-            break
-
-    if header_row is None:
-        return None
-
-    df = raw.iloc[header_row + 2:].copy()  # datos desde la tercera fila del header
-    df.columns = cols_final
-    df = df.dropna(how="all")
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
-
-def read_excel_asistencia_special(file, sheet_name=0):
-    """
-    Para tu caso: encabezado está combinado en B1+B2, datos desde B3.
-    Primero intentamos 2-filas (must_have RUT + Fecha Entrada),
-    si falla, fallback 1-fila.
-    """
-    df = read_excel_detect_header_two_rows(file, sheet_name=sheet_name, must_have=("RUT", "Fecha Entrada"))
-    if df is not None:
-        return df
-    df = read_excel_detect_header_one_row(file, sheet_name=sheet_name, must_have=("RUT", "Fecha Entrada"))
-    if df is not None:
-        return df
-    # último recurso: con solo RUT
-    df = read_excel_detect_header_two_rows(file, sheet_name=sheet_name, must_have=("RUT",))
-    if df is not None:
-        return df
-    df = read_excel_detect_header_one_row(file, sheet_name=sheet_name, must_have=("RUT",))
-    if df is not None:
-        return df
-    raise RuntimeError("No pude detectar encabezado en Asistencia (no encuentro RUT / Fecha Entrada).")
-
-def read_excel_inasistencia_detect(file, sheet_name=0):
-    """
-    Inasistencias suele venir normal (una fila).
-    """
-    df = read_excel_detect_header_one_row(file, sheet_name=sheet_name, must_have=("RUT", "Día"))
-    if df is not None:
-        return df
-    df = read_excel_detect_header_two_rows(file, sheet_name=sheet_name, must_have=("RUT", "Día"))
-    if df is not None:
-        return df
-    # fallback: solo RUT
-    df = read_excel_detect_header_one_row(file, sheet_name=sheet_name, must_have=("RUT",))
-    if df is not None:
-        return df
-    raise RuntimeError("No pude detectar encabezado en Inasistencias (no encuentro RUT / Día).")
-
+# =========================
+# Helpers - tiempos / turnos
+# =========================
 def parse_time_only(x):
     if pd.isna(x) or str(x).strip() == "":
         return None
@@ -244,6 +237,10 @@ def hours_between(dt_start: datetime, dt_end: datetime) -> float:
         return 0.0
     return (dt_end - dt_start).total_seconds() / 3600.0
 
+
+# =========================
+# Helpers - estilos excel
+# =========================
 def style_sheet_table(ws):
     header_fill = PatternFill("solid", fgColor=CABIFY["header"])
     header_font = Font(color=CABIFY["white"], bold=True)
@@ -275,6 +272,7 @@ def style_sheet_table(ws):
 # =========================
 with st.sidebar:
     st.header("Inputs (nuevo esquema)")
+
     f_asistencia = st.file_uploader("1) Reporte de Asistencia (XLS/XLSX)", type=["xls", "xlsx"])
     f_inasist   = st.file_uploader("2) Reporte de Inasistencias (XLS/XLSX)", type=["xls", "xlsx"])
     f_planif    = st.file_uploader("3) Planificación de Turnos (CSV)", type=["csv"])
@@ -285,33 +283,61 @@ with st.sidebar:
     only_area = st.text_input("Filtrar Área (opcional)", value="AEROPUERTO")
     min_diff_h = st.number_input("Umbral diferencia horas (|plan - real|) para incidencia", value=0.5, step=0.25, min_value=0.0)
 
+    st.divider()
+    debug_mode = st.checkbox("Modo diagnóstico (ver lectura cruda)", value=False)
+
 if not all([f_asistencia, f_inasist, f_planif, f_codif]):
     st.info("Sube los 4 archivos para comenzar.")
     st.stop()
 
 
 # =========================
-# Load
+# Load (con diagnóstico)
 # =========================
 try:
-    df_asist = read_excel_asistencia_special(f_asistencia)
-    df_inas  = read_excel_inasistencia_detect(f_inasist)
-    df_plan  = read_csv_flexible(f_planif)
-    df_cod   = read_csv_flexible(f_codif)
+    df_asist, raw_asist = read_asistencia_b1b2_with_debug(f_asistencia)
+    df_inas, raw_inas = read_inasistencia_detect(f_inasist)
+    df_plan = read_csv_flexible(f_planif)
+    df_cod = read_csv_flexible(f_codif)
 except Exception as e:
     st.error(str(e))
     st.stop()
 
-# Strip cols
+# diagnóstico asistencia
+if debug_mode:
+    with st.expander("Diagnóstico Asistencia (lectura cruda / columnas)", expanded=True):
+        st.write("**Primeras 8 filas crudas (sin header):**")
+        st.dataframe(raw_asist.head(8), use_container_width=True)
+
+        st.write("**Columnas construidas (B1+B2 con merges + desde B):**")
+        st.write(list(df_asist.columns))
+
+        st.write("**Columnas normalizadas (para detectar caracteres raros):**")
+        st.write([{c: _norm_colname(c)} for c in df_asist.columns[:60]])
+
+        suspects = [c for c in df_asist.columns if "rut" in _norm_colname(c)]
+        st.write("**Columnas sospechosas que contienen 'rut':**", suspects)
+
+# diagnóstico inasistencias
+if debug_mode:
+    with st.expander("Diagnóstico Inasistencias (lectura cruda / columnas)", expanded=False):
+        st.write("**Primeras 8 filas crudas (sin header):**")
+        st.dataframe(raw_inas.head(8), use_container_width=True)
+        st.write("**Columnas detectadas:**")
+        st.write(list(df_inas.columns))
+        suspects = [c for c in df_inas.columns if "rut" in _norm_colname(c)]
+        st.write("**Columnas sospechosas que contienen 'rut':**", suspects)
+
+# strip cols
 df_plan.columns = [str(c).strip() for c in df_plan.columns]
-df_cod.columns  = [str(c).strip() for c in df_cod.columns]
+df_cod.columns = [str(c).strip() for c in df_cod.columns]
 
 
 # =========================
 # Codificación: Sigla -> Horario
 # =========================
 c_sigla = find_col(df_cod, ["Sigla"])
-c_hor   = find_col(df_cod, ["Horario"])
+c_hor = find_col(df_cod, ["Horario"])
 if not c_sigla or not c_hor:
     st.error("No encontré columnas Sigla/Horario en Codificación (CSV).")
     st.stop()
@@ -326,9 +352,9 @@ turno_to_hor = dict(zip(df_cod_map["Sigla"], df_cod_map["Horario"]))
 # Planificación CSV ancho -> largo
 # =========================
 col_name = find_col(df_plan, ["Nombre del Colaborador"])
-col_rut  = find_col(df_plan, ["RUT"])
+col_rut = find_col(df_plan, ["RUT"])
 col_area = find_col(df_plan, ["Área", "Area"])
-col_sup  = find_col(df_plan, ["Supervisor"])
+col_sup = find_col(df_plan, ["Supervisor"])
 
 for need, label in [(col_name, "Nombre del Colaborador"), (col_rut, "RUT"), (col_area, "Área"), (col_sup, "Supervisor")]:
     if not need:
@@ -344,7 +370,7 @@ df_pl_long = df_plan.melt(
     id_vars=fixed,
     value_vars=date_cols,
     var_name="Fecha",
-    value_name="Turno_Cod"
+    value_name="Turno_Cod",
 )
 df_pl_long["Fecha_dt"] = df_pl_long["Fecha"].apply(try_parse_date_any)
 df_pl_long["Turno_Cod"] = df_pl_long["Turno_Cod"].astype(str).str.strip()
@@ -363,21 +389,22 @@ c1, c2 = st.columns(2)
 with c1:
     start_date = st.date_input("Desde", value=min_dt.date())
 with c2:
-    end_date   = st.date_input("Hasta", value=max_dt.date())
+    end_date = st.date_input("Hasta", value=max_dt.date())
 
 if start_date > end_date:
     st.error("Rango inválido: Desde > Hasta")
     st.stop()
 
 start_dt = pd.to_datetime(start_date)
-end_dt   = pd.to_datetime(end_date)
+end_dt = pd.to_datetime(end_date)
 
 df_pl_long = df_pl_long[(df_pl_long["Fecha_dt"] >= start_dt) & (df_pl_long["Fecha_dt"] <= end_dt)].copy()
 
-# turno activo: no vacío y no "L"
+# turno activo: no vacío y no L
 df_pl_long["Es_Libre"] = df_pl_long["Turno_Cod"].astype(str).str.upper().eq("L")
 df_pl_act = df_pl_long[(df_pl_long["Turno_Cod"] != "") & (~df_pl_long["Es_Libre"])].copy()
 
+# horario planificado
 df_pl_act["Horario_Plan"] = df_pl_act["Turno_Cod"].map(turno_to_hor).fillna("")
 df_pl_act[["PlanStart_t", "PlanEnd_t"]] = df_pl_act["Horario_Plan"].apply(lambda x: pd.Series(parse_range_to_times(x)))
 
@@ -388,18 +415,28 @@ valid_ruts = set(df_pl_long["RUT_norm"].dropna().unique().tolist())
 
 
 # =========================
-# Asistencia / Inasistencias: normalizar y filtrar
+# Asistencia / Inasistencias: columnas mínimas + filtros
 # =========================
 # Asistencia
-c_rut_a = find_col(df_asist, ["RUT"])
+c_rut_a = find_col(df_asist, ["RUT", "Rut", "R.U.T", "R.U.T."])
+if c_rut_a is None:
+    suspects = [c for c in df_asist.columns if "rut" in _norm_colname(c)]
+    st.error(
+        "No encontré columna RUT en Asistencia.\n\n"
+        f"Columnas sospechosas que contienen 'rut': {suspects}\n\n"
+        f"Primeras 30 columnas detectadas: {list(df_asist.columns)[:30]}\n\n"
+        "Activa 'Modo diagnóstico' para ver la lectura cruda y detectar el problema."
+    )
+    st.stop()
+
 c_area_a = find_col(df_asist, ["Área", "Area"])
 c_fent = find_col(df_asist, ["Fecha Entrada", "FechaEntrada"])
 c_hent = find_col(df_asist, ["Hora Entrada", "HoraEntrada"])
 c_fsal = find_col(df_asist, ["Fecha Salida", "FechaSalida"])
 c_hsal = find_col(df_asist, ["Hora Salida", "HoraSalida"])
 
-c_rec_in  = find_col(df_asist, ["Dentro del Recinto (Entrada)", "Dentro de Recinto(Entrada)", "DentrodeRecintoEntrada"])
-c_rec_out = find_col(df_asist, ["Dentro del Recinto (Salida)",  "Dentro de Recinto(Salida)",  "DentrodeRecintoSalida"])
+c_rec_in = find_col(df_asist, ["Dentro del Recinto (Entrada)", "Dentro de Recinto(Entrada)"])
+c_rec_out = find_col(df_asist, ["Dentro del Recinto (Salida)", "Dentro de Recinto(Salida)"])
 
 c_nombre = find_col(df_asist, ["Nombre"])
 c_pa = find_col(df_asist, ["Primer Apellido", "PrimerApellido"])
@@ -408,8 +445,8 @@ c_esp = find_col(df_asist, ["Especialidad"])
 c_sup_a = find_col(df_asist, ["Supervisor"])
 c_turno_txt = find_col(df_asist, ["Turno"])
 
-if not c_rut_a or not c_fent:
-    st.error("Asistencia: faltan columnas mínimas (RUT y/o Fecha Entrada).")
+if not c_fent:
+    st.error("Asistencia: falta columna 'Fecha Entrada'. Activa modo diagnóstico para ver columnas construidas.")
     st.stop()
 
 df_asist["RUT_norm"] = df_asist[c_rut_a].apply(normalize_rut)
@@ -423,8 +460,12 @@ df_asist = df_asist[(df_asist["Fecha_base"] >= start_dt) & (df_asist["Fecha_base
 df_asist["Clave_RUT_Fecha"] = df_asist["RUT_norm"].astype(str) + "_" + df_asist["Fecha_base"].dt.strftime("%Y-%m-%d").fillna("")
 
 # Inasistencias
-c_rut_i = find_col(df_inas, ["RUT"])
+c_rut_i = find_col(df_inas, ["RUT", "Rut", "R.U.T", "R.U.T."])
 c_dia = find_col(df_inas, ["Día", "Dia"])
+if c_rut_i is None or c_dia is None:
+    st.error("Inasistencias: faltan columnas 'RUT' y/o 'Día'. Activa modo diagnóstico.")
+    st.stop()
+
 c_area_i = find_col(df_inas, ["Área", "Area"])
 c_nombre_i = find_col(df_inas, ["Nombre"])
 c_pa_i = find_col(df_inas, ["Primer Apellido", "PrimerApellido"])
@@ -433,10 +474,6 @@ c_esp_i = find_col(df_inas, ["Especialidad"])
 c_sup_i = find_col(df_inas, ["Supervisor"])
 c_turno_i = find_col(df_inas, ["Turno"])
 c_mot_i = find_col(df_inas, ["Motivo"])
-
-if not c_rut_i or not c_dia:
-    st.error("Inasistencias: faltan columnas mínimas (RUT y/o Día).")
-    st.stop()
 
 df_inas["RUT_norm"] = df_inas[c_rut_i].apply(normalize_rut)
 df_inas = df_inas[df_inas["RUT_norm"].isin(valid_ruts)].copy()
@@ -474,7 +511,7 @@ def planned_hours_for(key: str):
 # =========================
 mot_map = {"-": "Injustificada", "P": "Permiso", "L": "Licencia", "V": "Vacaciones", "C": "Compensado"}
 
-# 1) Asistencia -> incidencias (Marcaje/Turno) por diferencia horas
+# 1) Asistencia -> incidencias (Marcaje/Turno) por diferencia horas plan vs horas trabajadas
 as_rows = []
 for _, r in df_asist.iterrows():
     key = r["Clave_RUT_Fecha"]
@@ -483,7 +520,7 @@ for _, r in df_asist.iterrows():
     d0 = r["Fecha_base"].date() if not pd.isna(r["Fecha_base"]) else None
 
     plan_start = combine_date_time(d0, ps) if ps else None
-    plan_end   = combine_date_time(d0, pe) if pe else None
+    plan_end = combine_date_time(d0, pe) if pe else None
     plan_start, plan_end = ensure_overnight(plan_start, plan_end)
 
     d_in = try_parse_date_any(r.get(c_fent)).date() if c_fent else d0
@@ -492,12 +529,13 @@ for _, r in df_asist.iterrows():
     t_out = parse_time_only(r.get(c_hsal)) if c_hsal else None
 
     real_start = combine_date_time(d_in, t_in) if (d_in and t_in) else None
-    real_end   = combine_date_time(d_out, t_out) if (d_out and t_out) else None
+    real_end = combine_date_time(d_out, t_out) if (d_out and t_out) else None
     real_start, real_end = ensure_overnight(real_start, real_end)
 
     horas_trab = round(hours_between(real_start, real_end), 2) if (real_start and real_end) else 0.0
     horas_plan = planned_hours_for(key)
 
+    # si no hay planificación para ese día, no evaluamos
     if horas_plan <= 0:
         continue
 
@@ -549,8 +587,7 @@ for _, r in df_inas.iterrows():
     horas_plan = planned_hours_for(key)
 
     mot = "" if not c_mot_i else str(r.get(c_mot_i)).strip()
-    mot_u = mot.upper()
-    clas = mot_map.get(mot_u, "Seleccionar")
+    clas = mot_map.get(mot.upper(), "Seleccionar")
 
     ps, pe, _, plan_hor = planned_window_for(key)
 
@@ -621,7 +658,7 @@ ed["Minutos Retraso"] = pd.to_numeric(ed["Minutos Retraso"], errors="coerce").fi
 ed["Minutos Salida Anticipada"] = pd.to_numeric(ed["Minutos Salida Anticipada"], errors="coerce").fillna(0)
 
 inas_inj = ed[(ed["Tipo_Incidencia"] == "Inasistencia") & (ed["Clasificación Manual"] == "Injustificada")]
-inc_inj  = ed[(ed["Tipo_Incidencia"] == "Marcaje/Turno") & (ed["Clasificación Manual"] == "Injustificada")]
+inc_inj = ed[(ed["Tipo_Incidencia"] == "Marcaje/Turno") & (ed["Clasificación Manual"] == "Injustificada")]
 
 resumen = pd.DataFrame([
     ["Inasistencia (Total)", int((ed["Tipo_Incidencia"] == "Inasistencia").sum())],
@@ -681,6 +718,7 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
     wb = Workbook()
     wb.remove(wb.active)
 
+    # Listas
     ws_l = wb.create_sheet("Listas")
     ws_l["A1"] = "Tipo_Incidencia"
     for i, v in enumerate(TIPO_OPTS, start=2):
@@ -690,6 +728,7 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
         ws_l[f"C{i}"] = v
     ws_l.sheet_state = "hidden"
 
+    # Detalle
     ws = wb.create_sheet("Detalle")
     df_out = df_detalle.copy()
     df_out["Fecha"] = pd.to_datetime(df_out["Fecha"], errors="coerce")
@@ -698,10 +737,12 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
         ws.append(r)
     style_sheet_table(ws)
 
+    # Fecha corta
     fecha_col = list(df_out.columns).index("Fecha") + 1
     for rr in range(2, ws.max_row + 1):
         ws.cell(rr, fecha_col).number_format = "DD/MM/YYYY"
 
+    # Validaciones
     cols = list(df_out.columns)
     col_tipo = cols.index("Tipo_Incidencia") + 1
     col_clas = cols.index("Clasificación Manual") + 1
@@ -714,6 +755,7 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
     dv_tipo.add(f"{ws.cell(2, col_tipo).coordinate}:{ws.cell(ws.max_row, col_tipo).coordinate}")
     dv_clas.add(f"{ws.cell(2, col_clas).coordinate}:{ws.cell(ws.max_row, col_clas).coordinate}")
 
+    # Resumen (fórmulas)
     ws_r = wb.create_sheet("Resumen")
     ws_r.append(["KPI", "Valor"])
 
@@ -735,6 +777,7 @@ def build_excel(df_detalle: pd.DataFrame, start_dt, end_dt, planned_daily: dict)
         ws_r.append([k, f])
     style_sheet_table(ws_r)
 
+    # KPIs diarios
     ws_k = wb.create_sheet("KPIs_diarios")
     ws_k.cell(row=1, column=1, value="KPI")
 
