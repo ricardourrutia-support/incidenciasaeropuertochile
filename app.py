@@ -10,8 +10,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protecti
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-
-APP_VERSION = "v2026-01-06_PLAN_BASE_FILTER_NO_SUP_SELECTOR"
+APP_VERSION = "v2026-01-06_OPT_B_AUSENTISMO_LOGIC_PLAN_BASE_NO_SUP"
 
 st.set_page_config(page_title="Ausentismo e Incidencias Operativas", layout="wide")
 st.title("Plataforma de Gestión de Ausentismo e Incidencias Operativas")
@@ -22,7 +21,6 @@ st.sidebar.success(f"APP RUNNING: {APP_VERSION}")
 # Estilo (Cabify-ish)
 # =========================
 CABIFY_HEADER = "362065"
-CABIFY_ACCENT = "E83C96"
 GRID = "D9D9D9"
 WHITE = "FFFFFF"
 
@@ -360,7 +358,7 @@ plan_long = plan_long[(plan_long["Fecha"] >= date_from) & (plan_long["Fecha"] <=
 plan_long = plan_long[plan_long["Turno_Cod"] != ""].copy()
 plan_long = plan_long[~plan_long["Turno_Cod"].astype(str).str.upper().isin(["L"])].copy()
 
-# ✅ BASE MANDA: SOLO RUTs EN PLANIFICACIÓN (PERIODO + TURNO VALIDO)
+# ✅ BASE MANDA: SOLO RUTs QUE ESTÁN EN PLANIFICACIÓN (EN EL PERIODO Y TURNO VALIDO)
 allowed_ruts = set(plan_long["RUT_norm"].dropna().astype(str).tolist())
 df_asist = df_asist[df_asist["RUT_norm"].isin(allowed_ruts)].copy()
 df_inas = df_inas[df_inas["RUT_norm"].isin(allowed_ruts)].copy()
@@ -455,6 +453,12 @@ def fmt1(x):
     except Exception:
         return ""
 
+# ✅ FIX robusto: concatenación siempre como string (evita UFuncNoLoopError)
+hp = df_inc["Horas_Plan"].map(fmt1).astype("string").fillna("")
+ht = df_inc["Horas_Trab"].map(fmt1).astype("string").fillna("")
+dh = df_inc["Diff_h"].map(fmt1).astype("string").fillna("")
+mf = df_inc["Marcas_Fuera"].astype("string").fillna("0")
+
 df_inc_detalle = pd.DataFrame({
     "Fecha": df_inc["Fecha_base"],
     "RUT": df_inc[c_rut_a],
@@ -469,12 +473,7 @@ df_inc_detalle = pd.DataFrame({
     "Dentro de Recinto(Entrada)": df_inc[c_rec_in],
     "Dentro de Recinto(Salida)": df_inc[c_rec_out],
     "Tipo_Incidencia": "Marcaje/Turno",
-    "Detalle": (
-        "HorasPlan=" + df_inc["Horas_Plan"].map(fmt1) +
-        " | HorasTrab=" + df_inc["Horas_Trab"].map(fmt1) +
-        " | Diff_h=" + df_inc["Diff_h"].map(fmt1) +
-        " | MarcasFuera=" + df_inc["Marcas_Fuera"].astype(str)
-    ),
+    "Detalle": ("HorasPlan=" + hp + " | HorasTrab=" + ht + " | Diff_h=" + dh + " | MarcasFuera=" + mf),
     "Clasificación Manual": "Seleccionar",
     "Minutos Retraso": 0,
     "Minutos Salida Anticipada": 0,
@@ -507,7 +506,7 @@ df_inas_detalle = pd.DataFrame({
     "Minutos Salida Anticipada": 0,
 })
 
-# Auto por motivo
+# Auto por motivo (solo preselección)
 if c_mot and c_mot in df_inas.columns:
     mot = df_inas[c_mot].astype(str).str.strip().str.upper()
     df_inas_detalle.loc[mot == "P", "Clasificación Manual"] = "Permiso"
@@ -538,6 +537,9 @@ edited = st.data_editor(
 
 # =========================
 # Validación obligatoria (solo para descarga)
+# Nueva regla (impacto gestión):
+# - Si Marcaje/Turno y Clasificación NO es Seleccionar ni No Procede => exigir minutos > 0
+# - Si NO es Marcaje/Turno => minutos deben ser 0
 # =========================
 def to_int_safe(x):
     try:
@@ -554,23 +556,34 @@ edited_valid["Minutos_Total"] = edited_valid["Minutos Retraso"] + edited_valid["
 
 mask_need_minutes = (
     (edited_valid["Tipo_Incidencia"] == "Marcaje/Turno") &
-    (edited_valid["Clasificación Manual"] == "Injustificada") &
+    (~edited_valid["Clasificación Manual"].isin(["Seleccionar", "No Procede"])) &
     (edited_valid["Minutos_Total"] <= 0)
 )
 mask_minutes_not_allowed = (
     (edited_valid["Tipo_Incidencia"] != "Marcaje/Turno") &
     (edited_valid["Minutos_Total"] > 0)
 )
+
 invalid = edited_valid[mask_need_minutes | mask_minutes_not_allowed].copy()
 if len(invalid) > 0:
-    st.error("Hay registros inválidos para descarga: Marcaje/Turno + Injustificada requiere minutos (>0), y si NO es Marcaje/Turno los minutos deben ser 0.")
-    st.dataframe(invalid[["Fecha","RUT","Supervisor","Tipo_Incidencia","Clasificación Manual","Minutos Retraso","Minutos Salida Anticipada"]], use_container_width=True)
+    st.error(
+        "Reglas para descargar:\n"
+        "- Marcaje/Turno + (Clasificación distinta de Seleccionar/No Procede) requiere minutos (>0)\n"
+        "- Si NO es Marcaje/Turno, entonces minutos deben ser 0."
+    )
+    st.dataframe(
+        invalid[["Fecha","RUT","Supervisor","Tipo_Incidencia","Clasificación Manual","Minutos Retraso","Minutos Salida Anticipada"]],
+        use_container_width=True
+    )
     st.stop()
 
 edited = edited_valid.drop(columns=["Minutos_Total"], errors="ignore")
 
 # =========================
 # Excel builder (sin selector supervisor)
+# Mantiene nombres de columnas como "Injust" pero lógica nueva:
+# - Inasistencia cuenta si Clasificación NOT IN (Seleccionar, No Procede)
+# - Incidencia cuenta (minutos) si Clasificación NOT IN (Seleccionar, No Procede)
 # =========================
 def write_df(ws, df: pd.DataFrame):
     ws.append(list(df.columns))
@@ -619,7 +632,6 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     det_df = edited_df.copy()
     det_df["Fecha"] = pd.to_datetime(det_df["Fecha"], errors="coerce").dt.date
 
-    start_table_row = 1
     write_df(ws_det, det_df)
     style_header_row(ws_det, 1, CABIFY_HEADER)
     ws_det.freeze_panes = "A2"
@@ -635,13 +647,13 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     add_dropdown(ws_det, col_letter_of("Clasificación Manual"), 2, n_rows, CLASIF_OPTS, "Clasificación", allow_blank=False)
 
     c_fecha = cols.index("Fecha") + 1
-    for rr in range(2, n_rows+1):
+    for rr in range(2, n_rows + 1):
         ws_det.cell(rr, c_fecha).number_format = "DD/MM/YYYY"
 
     autosize_columns(ws_det)
 
     lock_all_cells(ws_det)
-    for nm in ["Tipo_Incidencia","Clasificación Manual","Minutos Retraso","Minutos Salida Anticipada"]:
+    for nm in ["Tipo_Incidencia", "Clasificación Manual", "Minutos Retraso", "Minutos Salida Anticipada"]:
         unlock_range(ws_det, col_letter_of(nm), 2, n_rows)
     protect_sheet(ws_det)
 
@@ -657,11 +669,12 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     pl = pl[needed].copy()
     pl["Fecha"] = pd.to_datetime(pl["Fecha"], errors="coerce").dt.date
 
-    pl["Ausente_Injustificada"] = ""
-    pl["Min_Retraso_Injust"] = ""
+    # nombres se mantienen por compatibilidad (pero lógica cambia)
+    pl["Ausente_Injustificada"] = ""     # ahora significa: Ausente con impacto (clasificada != No Procede)
+    pl["Min_Retraso_Injust"] = ""        # ahora minutos con impacto (clasificada != No Procede)
     pl["Min_Salida_Injust"] = ""
     pl["Horas_Incid_Injust"] = ""
-    pl["Horas_Perdidas_Injust"] = ""
+    pl["Horas_Perdidas_Injust"] = ""     # horas perdidas con impacto
 
     write_df(ws_plan, pl)
     style_header_row(ws_plan, 1, CABIFY_HEADER)
@@ -669,17 +682,18 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     ws_plan.freeze_panes = "A2"
 
     pl_cols = list(pl.columns)
-    L_pl_fecha = get_column_letter(pl_cols.index("Fecha")+1)
-    L_pl_rutk  = get_column_letter(pl_cols.index("RUT_key")+1)
-    L_pl_hplan = get_column_letter(pl_cols.index("Horas_Plan")+1)
-    L_pl_aus   = get_column_letter(pl_cols.index("Ausente_Injustificada")+1)
-    L_pl_mr    = get_column_letter(pl_cols.index("Min_Retraso_Injust")+1)
-    L_pl_ms    = get_column_letter(pl_cols.index("Min_Salida_Injust")+1)
-    L_pl_hinc  = get_column_letter(pl_cols.index("Horas_Incid_Injust")+1)
-    L_pl_hperd = get_column_letter(pl_cols.index("Horas_Perdidas_Injust")+1)
+    L_pl_fecha = get_column_letter(pl_cols.index("Fecha") + 1)
+    L_pl_rutk  = get_column_letter(pl_cols.index("RUT_key") + 1)
+    L_pl_hplan = get_column_letter(pl_cols.index("Horas_Plan") + 1)
+
+    L_pl_aus   = get_column_letter(pl_cols.index("Ausente_Injustificada") + 1)
+    L_pl_mr    = get_column_letter(pl_cols.index("Min_Retraso_Injust") + 1)
+    L_pl_ms    = get_column_letter(pl_cols.index("Min_Salida_Injust") + 1)
+    L_pl_hinc  = get_column_letter(pl_cols.index("Horas_Incid_Injust") + 1)
+    L_pl_hperd = get_column_letter(pl_cols.index("Horas_Perdidas_Injust") + 1)
 
     det_cols = list(det_df.columns)
-    def dcol(name): return get_column_letter(det_cols.index(name)+1)
+    def dcol(name): return get_column_letter(det_cols.index(name) + 1)
 
     L_det_fecha = dcol("Fecha")
     L_det_rutk  = dcol("RUT_key")
@@ -688,26 +702,38 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     L_det_mr    = dcol("Minutos Retraso")
     L_det_ms    = dcol("Minutos Salida Anticipada")
 
-    for r in range(2, len(pl)+2):
+    # ✅ Nueva lógica (impacto):
+    # - Inasistencia cuenta si Clasificación NO es Seleccionar y NO es No Procede
+    # - Incidencias (minutos) cuentan si Clasificación NO es Seleccionar y NO es No Procede
+    for r in range(2, len(pl) + 2):
         ws_plan[f"{L_pl_aus}{r}"].value = (
-            f'=IF(COUNTIFS(Detalle!${L_det_fecha}:${L_det_fecha},{L_pl_fecha}{r},'
+            f'=IF(COUNTIFS('
+            f'Detalle!${L_det_fecha}:${L_det_fecha},{L_pl_fecha}{r},'
             f'Detalle!${L_det_rutk}:${L_det_rutk},{L_pl_rutk}{r},'
             f'Detalle!${L_det_tipo}:${L_det_tipo},"Inasistencia",'
-            f'Detalle!${L_det_clas}:${L_det_clas},"Injustificada")>0,1,0)'
+            f'Detalle!${L_det_clas}:${L_det_clas},"<>Seleccionar",'
+            f'Detalle!${L_det_clas}:${L_det_clas},"<>No Procede"'
+            f')>0,1,0)'
         )
         ws_plan[f"{L_pl_mr}{r}"].value = (
-            f'=SUMIFS(Detalle!${L_det_mr}:${L_det_mr},'
+            f'=SUMIFS('
+            f'Detalle!${L_det_mr}:${L_det_mr},'
             f'Detalle!${L_det_fecha}:${L_det_fecha},{L_pl_fecha}{r},'
             f'Detalle!${L_det_rutk}:${L_det_rutk},{L_pl_rutk}{r},'
             f'Detalle!${L_det_tipo}:${L_det_tipo},"Marcaje/Turno",'
-            f'Detalle!${L_det_clas}:${L_det_clas},"Injustificada")'
+            f'Detalle!${L_det_clas}:${L_det_clas},"<>Seleccionar",'
+            f'Detalle!${L_det_clas}:${L_det_clas},"<>No Procede"'
+            f')'
         )
         ws_plan[f"{L_pl_ms}{r}"].value = (
-            f'=SUMIFS(Detalle!${L_det_ms}:${L_det_ms},'
+            f'=SUMIFS('
+            f'Detalle!${L_det_ms}:${L_det_ms},'
             f'Detalle!${L_det_fecha}:${L_det_fecha},{L_pl_fecha}{r},'
             f'Detalle!${L_det_rutk}:${L_det_rutk},{L_pl_rutk}{r},'
             f'Detalle!${L_det_tipo}:${L_det_tipo},"Marcaje/Turno",'
-            f'Detalle!${L_det_clas}:${L_det_clas},"Injustificada")'
+            f'Detalle!${L_det_clas}:${L_det_clas},"<>Seleccionar",'
+            f'Detalle!${L_det_clas}:${L_det_clas},"<>No Procede"'
+            f')'
         )
         ws_plan[f"{L_pl_hinc}{r}"].value = f'=({L_pl_mr}{r}+{L_pl_ms}{r})/60'
         ws_plan[f"{L_pl_hperd}{r}"].value = f'=IF({L_pl_aus}{r}=1,{L_pl_hplan}{r},0)+{L_pl_hinc}{r}'
@@ -717,14 +743,14 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
 
     # Cumplimiento
     ws_c = wb.create_sheet("Cumplimiento")
-    base = pl[["RUT","RUT_key","Nombre del Colaborador","Supervisor","Área"]].drop_duplicates().copy()
-    base = base.sort_values(["Nombre del Colaborador","RUT"]).reset_index(drop=True)
+    base = pl[["RUT", "RUT_key", "Nombre del Colaborador", "Supervisor", "Área"]].drop_duplicates().copy()
+    base = base.sort_values(["Nombre del Colaborador", "RUT"]).reset_index(drop=True)
 
     out = base.copy()
     out["Turnos_Planificados"] = ""
-    out["Inasistencias_Injustificadas"] = ""
+    out["Inasistencias_Injustificadas"] = ""  # ahora: ausencias con impacto
     out["Horas_programadas"] = ""
-    out["Horas_perdidas_injust"] = ""
+    out["Horas_perdidas_injust"] = ""         # ahora: horas perdidas con impacto
     out["Ausentismo_%"] = ""
     out["Cumplimiento_%"] = ""
 
@@ -734,21 +760,22 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     ws_c.freeze_panes = "A2"
 
     c_cols = list(out.columns)
-    L_c_rutk  = get_column_letter(c_cols.index("RUT_key")+1)
-    L_c_tp    = get_column_letter(c_cols.index("Turnos_Planificados")+1)
-    L_c_ina   = get_column_letter(c_cols.index("Inasistencias_Injustificadas")+1)
-    L_c_hprog = get_column_letter(c_cols.index("Horas_programadas")+1)
-    L_c_hperd = get_column_letter(c_cols.index("Horas_perdidas_injust")+1)
-    L_c_ausp  = get_column_letter(c_cols.index("Ausentismo_%")+1)
-    L_c_cump  = get_column_letter(c_cols.index("Cumplimiento_%")+1)
+    L_c_rutk  = get_column_letter(c_cols.index("RUT_key") + 1)
+    L_c_tp    = get_column_letter(c_cols.index("Turnos_Planificados") + 1)
+    L_c_ina   = get_column_letter(c_cols.index("Inasistencias_Injustificadas") + 1)
+    L_c_hprog = get_column_letter(c_cols.index("Horas_programadas") + 1)
+    L_c_hperd = get_column_letter(c_cols.index("Horas_perdidas_injust") + 1)
+    L_c_ausp  = get_column_letter(c_cols.index("Ausentismo_%") + 1)
+    L_c_cump  = get_column_letter(c_cols.index("Cumplimiento_%") + 1)
 
-    for r in range(2, len(out)+2):
+    for r in range(2, len(out) + 2):
         ws_c[f"{L_c_tp}{r}"].value = f'=COUNTIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r})'
         ws_c[f"{L_c_ina}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r},Planificacion_long!${L_pl_aus}:${L_pl_aus})'
         ws_c[f"{L_c_hprog}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r},Planificacion_long!${L_pl_hplan}:${L_pl_hplan})'
         ws_c[f"{L_c_hperd}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r},Planificacion_long!${L_pl_hperd}:${L_pl_hperd})'
         ws_c[f"{L_c_ausp}{r}"].value = f'=IF({L_c_hprog}{r}=0,"",{L_c_hperd}{r}/{L_c_hprog}{r})'
         ws_c[f"{L_c_ausp}{r}"].number_format = "0.00%"
+        # cumplimiento por turnos (simple): 1 - (ausencias impacto / turnos planificados)
         ws_c[f"{L_c_cump}{r}"].value = f'=IF({L_c_tp}{r}=0,"",MAX(0,1-({L_c_ina}{r}/{L_c_tp}{r})))'
         ws_c[f"{L_c_cump}{r}"].number_format = "0.00%"
 
@@ -761,9 +788,9 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
 
     kpis = [
         "Turnos_planificados",
-        "Ausencias_injustificadas",
+        "Ausencias_injustificadas",  # ahora: ausencias impacto
         "Horas_programadas",
-        "Horas_perdidas_injust",
+        "Horas_perdidas_injust",     # ahora: horas perdidas impacto
         "Ausentismo_%",
     ]
     ws_k.append(["KPI"] + fechas)
@@ -799,7 +826,7 @@ excel_bytes = build_excel(edited, plan_long, date_from, date_to)
 
 st.subheader("Descarga")
 st.download_button(
-    "Descargar Excel (base manda = Planificación)",
+    "Descargar Excel (Opción B aplicada)",
     data=excel_bytes,
     file_name=f"reporte_ausentismo_incidencias_{date_from}_{date_to}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
