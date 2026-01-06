@@ -10,7 +10,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protecti
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-APP_VERSION = "v2026-01-06_OPT_A_SEPARA_INJUST_vs_AUSENTISMO"
+APP_VERSION = "v2026-01-06_OPT_A_SEPARA_INJUST_vs_AUSENTISMO_FIX_HINAS"
 
 st.set_page_config(page_title="Ausentismo e Incidencias Operativas", layout="wide")
 st.title("Plataforma de Gestión de Ausentismo e Incidencias Operativas")
@@ -36,11 +36,11 @@ def style_header_row(ws, row=1, fill_hex=CABIFY_HEADER):
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = BORDER
 
-def autosize_columns(ws, max_width=45):
+def autosize_columns(ws, max_width=55):
     for col in ws.columns:
         max_len = 0
         col_letter = get_column_letter(col[0].column)
-        for c in col[:600]:
+        for c in col[:800]:
             v = c.value
             if v is None:
                 continue
@@ -89,6 +89,7 @@ def find_col(df, candidates):
 def read_raw(file, sheet=0):
     name = getattr(file, "name", "").lower()
     if name.endswith(".xls"):
+        # requiere xlrd==2.0.1
         return pd.read_excel(file, sheet_name=sheet, header=None, engine="xlrd")
     return pd.read_excel(file, sheet_name=sheet, header=None, engine="openpyxl")
 
@@ -670,6 +671,7 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     pl["Min_Salida_Injust"] = ""
     pl["Horas_Incid_Injust"] = ""
     pl["Horas_Perdidas_Injust"] = ""
+    pl["Horas_Inas_Injust"] = ""  # ✅ NUEVA: horas injustificadas por inasistencia
 
     # Impacto gestión (ausentismo KPI)
     pl["Ausente_Impacto"] = ""
@@ -693,6 +695,7 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     L_msi  = get_column_letter(pl_cols.index("Min_Salida_Injust") + 1)
     L_hii  = get_column_letter(pl_cols.index("Horas_Incid_Injust") + 1)
     L_hpi  = get_column_letter(pl_cols.index("Horas_Perdidas_Injust") + 1)
+    L_hinas = get_column_letter(pl_cols.index("Horas_Inas_Injust") + 1)  # ✅
 
     L_aim  = get_column_letter(pl_cols.index("Ausente_Impacto") + 1)
     L_mrm  = get_column_letter(pl_cols.index("Min_Retraso_Impacto") + 1)
@@ -721,6 +724,8 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
             f'Detalle!${L_det_clas}:${L_det_clas},"Injustificada"'
             f')>0,1,0)'
         )
+        ws_plan[f"{L_hinas}{r}"].value = f'=IF({L_ai}{r}=1,{L_pl_hplan}{r},0)'  # ✅
+
         ws_plan[f"{L_mri}{r}"].value = (
             f'=SUMIFS('
             f'Detalle!${L_det_mr}:${L_det_mr},'
@@ -740,7 +745,7 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
             f')'
         )
         ws_plan[f"{L_hii}{r}"].value = f'=({L_mri}{r}+{L_msi}{r})/60'
-        ws_plan[f"{L_hpi}{r}"].value = f'=IF({L_ai}{r}=1,{L_pl_hplan}{r},0)+{L_hii}{r}'
+        ws_plan[f"{L_hpi}{r}"].value = f'={L_hinas}{r}+{L_hii}{r}'
 
         # -------- Impacto gestión (ausentismo KPI) --------
         ws_plan[f"{L_aim}{r}"].value = (
@@ -782,7 +787,6 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     # Descuentos por colaborador (solo injustificado)
     # =========================
     ws_d = wb.create_sheet("Descuentos_por_colaborador")
-
     base = pl[["RUT", "RUT_key", "Nombre del Colaborador", "Supervisor", "Área"]].drop_duplicates().copy()
     base = base.sort_values(["Nombre del Colaborador", "RUT"]).reset_index(drop=True)
 
@@ -815,11 +819,13 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
             f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_d_rutk}{r},Planificacion_long!${L_mri}:${L_mri})+'
             f'SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_d_rutk}{r},Planificacion_long!${L_msi}:${L_msi})'
         )
-        ws_d[f"{L_d_hina}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_d_rutk}{r},Planificacion_long!${L_pl_hplan}:${L_pl_hplan}*Planificacion_long!${L_ai}:${L_ai})'
-        # Nota: Excel no permite SUMIF con multiplicación así directo en todas versiones.
-        # Solución segura: usamos SUMIF de Horas_Perdidas_Injust (ya incluye horas inas + horas incid)
-        ws_d[f"{L_d_hina}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_d_rutk}{r},Planificacion_long!${L_ai}:${L_ai})*0 + ""'
-        # dejamos horas inasist injust como derivado del total - incid (para compatibilidad)
+        # ✅ sin error: suma directa de columna auxiliar
+        ws_d[f"{L_d_hina}{r}"].value = (
+            f'=SUMIF('
+            f'Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_d_rutk}{r},'
+            f'Planificacion_long!${L_hinas}:${L_hinas}'
+            f')'
+        )
         ws_d[f"{L_d_hinc}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_d_rutk}{r},Planificacion_long!${L_hii}:${L_hii})'
         ws_d[f"{L_d_htot}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_d_rutk}{r},Planificacion_long!${L_hpi}:${L_hpi})'
 
@@ -877,3 +883,4 @@ st.download_button(
     file_name=f"reporte_ausentismo_incidencias_{date_from}_{date_to}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
