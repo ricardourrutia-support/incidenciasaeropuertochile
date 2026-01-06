@@ -11,7 +11,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 
-APP_VERSION = "v2026-01-06_FIX_SUP_DROPDOWN_RUTKEY_INAS_OK_NO_CF"
+APP_VERSION = "v2026-01-06_PLAN_BASE_FILTER_NO_SUP_SELECTOR"
 
 st.set_page_config(page_title="Ausentismo e Incidencias Operativas", layout="wide")
 st.title("Plataforma de Gestión de Ausentismo e Incidencias Operativas")
@@ -268,7 +268,7 @@ if "Fecha Entrada" not in df_asist.columns:
     st.stop()
 
 # =========================
-# Normalize base
+# Normalize base + area filter
 # =========================
 df_asist["RUT_norm"] = df_asist[c_rut_a].apply(normalize_rut)
 df_asist["Fecha_base"] = df_asist["Fecha Entrada"].apply(try_parse_date_any).dt.date
@@ -360,6 +360,11 @@ plan_long = plan_long[(plan_long["Fecha"] >= date_from) & (plan_long["Fecha"] <=
 plan_long = plan_long[plan_long["Turno_Cod"] != ""].copy()
 plan_long = plan_long[~plan_long["Turno_Cod"].astype(str).str.upper().isin(["L"])].copy()
 
+# ✅ BASE MANDA: SOLO RUTs EN PLANIFICACIÓN (PERIODO + TURNO VALIDO)
+allowed_ruts = set(plan_long["RUT_norm"].dropna().astype(str).tolist())
+df_asist = df_asist[df_asist["RUT_norm"].isin(allowed_ruts)].copy()
+df_inas = df_inas[df_inas["RUT_norm"].isin(allowed_ruts)].copy()
+
 # =========================
 # Codificación -> Horario Planificado / Horas_Plan
 # =========================
@@ -382,7 +387,7 @@ plan_long = plan_long.merge(
 )
 
 # =========================
-# Construcción Detalle
+# Detalle
 # =========================
 def combine_dt(fecha_col, hora_col):
     if pd.isna(fecha_col):
@@ -433,7 +438,6 @@ mask_inc = (
 )
 df_inc = asist_merge[mask_inc].copy()
 
-c_cod_a = find_col(df_asist, ["Código", "Codigo"])
 c_nom = find_col(df_asist, ["Nombre"])
 c_ap1 = find_col(df_asist, ["Primer Apellido", "PrimerApellido"])
 c_ap2 = find_col(df_asist, ["Segundo Apellido", "SegundoApellido"])
@@ -566,7 +570,7 @@ if len(invalid) > 0:
 edited = edited_valid.drop(columns=["Minutos_Total"], errors="ignore")
 
 # =========================
-# Excel helpers
+# Excel builder (sin selector supervisor)
 # =========================
 def write_df(ws, df: pd.DataFrame):
     ws.append(list(df.columns))
@@ -576,7 +580,7 @@ def write_df(ws, df: pd.DataFrame):
 def add_dropdown(ws, col_letter: str, start_row: int, end_row: int, options: list, prompt: str, allow_blank=False):
     formula = '"' + ",".join(options) + '"'
     dv = DataValidation(type="list", formula1=formula, allow_blank=allow_blank)
-    dv.showDropDown = False  # flecha visible en Excel
+    dv.showDropDown = False
     dv.promptTitle = "Seleccionar"
     dv.prompt = prompt
     ws.add_data_validation(dv)
@@ -595,14 +599,11 @@ def unlock_range(ws, col_letter, start_row, end_row):
     for r in range(start_row, end_row + 1):
         ws[f"{col_letter}{r}"].protection = Protection(locked=False)
 
-# =========================
-# Excel builder (INASISTENCIAS OK)
-# =========================
 def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: date, date_to: date) -> BytesIO:
     wb = Workbook()
     wb.remove(wb.active)
 
-    # Listas
+    # Listas (oculta)
     ws_list = wb.create_sheet("Listas")
     ws_list["A1"] = "Tipo_Incidencia"
     for i, v in enumerate(TIPO_OPTS, start=2):
@@ -613,76 +614,40 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     style_header_row(ws_list, 1, CABIFY_HEADER)
     ws_list.sheet_state = "hidden"
 
-    # -------------------------
-    # Detalle (principal)
-    # -------------------------
+    # Detalle
     ws_det = wb.create_sheet("Detalle")
-    ws_det["A1"] = "Supervisor (dropdown solo de apoyo; filtra en la tabla):"
-    ws_det["A1"].font = Font(bold=True, color=CABIFY_ACCENT)
-    ws_det["B1"] = ""
-
     det_df = edited_df.copy()
     det_df["Fecha"] = pd.to_datetime(det_df["Fecha"], errors="coerce").dt.date
 
-    start_table_row = 4
-    ws_det.append([])  # row2
-    ws_det.append([])  # row3
-    ws_det.append(list(det_df.columns))  # row4 headers
-    for r in det_df.itertuples(index=False):
-        ws_det.append(list(r))
-
-    style_header_row(ws_det, start_table_row, CABIFY_HEADER)
-    ws_det.freeze_panes = f"A{start_table_row+1}"
+    start_table_row = 1
+    write_df(ws_det, det_df)
+    style_header_row(ws_det, 1, CABIFY_HEADER)
+    ws_det.freeze_panes = "A2"
 
     cols = list(det_df.columns)
-    n_rows = len(det_df) + start_table_row
+    n_rows = len(det_df) + 1
     last_col = get_column_letter(len(cols))
-    ws_det.auto_filter.ref = f"A{start_table_row}:{last_col}{n_rows}"
+    ws_det.auto_filter.ref = f"A1:{last_col}{n_rows}"
 
     def col_letter_of(name): return get_column_letter(cols.index(name) + 1)
 
-    # dropdown supervisor (B1)
-    if "Supervisor" in det_df.columns:
-        sup_values = sorted([s for s in det_df["Supervisor"].dropna().astype(str).str.strip().unique().tolist() if s and s.lower()!="nan"])
-    else:
-        sup_values = []
-    ws_list["E1"] = "Supervisores"
-    for i, v in enumerate(sup_values, start=2):
-        ws_list[f"E{i}"] = v
+    add_dropdown(ws_det, col_letter_of("Tipo_Incidencia"), 2, n_rows, TIPO_OPTS, "Inasistencia / Marcaje/Turno / No Procede", allow_blank=False)
+    add_dropdown(ws_det, col_letter_of("Clasificación Manual"), 2, n_rows, CLASIF_OPTS, "Clasificación", allow_blank=False)
 
-    if sup_values:
-        end_row = 1 + len(sup_values)
-        dv_sup = DataValidation(type="list", formula1=f"=Listas!$E$2:$E${end_row}", allow_blank=True)
-        dv_sup.showDropDown = False
-        ws_det.add_data_validation(dv_sup)
-        dv_sup.add("B1")
-        ws_det["B1"].value = sup_values[0]
-
-    # dropdowns columnas
-    add_dropdown(ws_det, col_letter_of("Tipo_Incidencia"), start_table_row+1, n_rows, TIPO_OPTS, "Inasistencia / Marcaje/Turno / No Procede", allow_blank=False)
-    add_dropdown(ws_det, col_letter_of("Clasificación Manual"), start_table_row+1, n_rows, CLASIF_OPTS, "Clasificación", allow_blank=False)
-
-    # formato fecha
     c_fecha = cols.index("Fecha") + 1
-    for rr in range(start_table_row+1, n_rows+1):
+    for rr in range(2, n_rows+1):
         ws_det.cell(rr, c_fecha).number_format = "DD/MM/YYYY"
 
     autosize_columns(ws_det)
 
-    # Protección: dejar editable B1 y las columnas editables
     lock_all_cells(ws_det)
-    ws_det["B1"].protection = Protection(locked=False)
     for nm in ["Tipo_Incidencia","Clasificación Manual","Minutos Retraso","Minutos Salida Anticipada"]:
-        unlock_range(ws_det, col_letter_of(nm), start_table_row+1, n_rows)
+        unlock_range(ws_det, col_letter_of(nm), 2, n_rows)
     protect_sheet(ws_det)
 
-    # -------------------------
     # Planificacion_long (usa RUT_key)
-    # -------------------------
     ws_plan = wb.create_sheet("Planificacion_long")
     pl = plan_long_df.copy()
-
-    # agregamos claves
     pl["RUT_key"] = pl["RUT"].apply(normalize_rut)
 
     needed = ["Fecha", "RUT", "RUT_key", "Nombre del Colaborador", "Área", "Supervisor", "Horario Planificado", "Horas_Plan"]
@@ -696,7 +661,7 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     pl["Min_Retraso_Injust"] = ""
     pl["Min_Salida_Injust"] = ""
     pl["Horas_Incid_Injust"] = ""
-    pl["Horas_Perdidas_Injust"] = ""  # <- aquí caerán horas completas del turno si inasistencia injustificada
+    pl["Horas_Perdidas_Injust"] = ""
 
     write_df(ws_plan, pl)
     style_header_row(ws_plan, 1, CABIFY_HEADER)
@@ -723,7 +688,6 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
     L_det_mr    = dcol("Minutos Retraso")
     L_det_ms    = dcol("Minutos Salida Anticipada")
 
-    # fórmulas por fila (clave: Fecha + RUT_key)
     for r in range(2, len(pl)+2):
         ws_plan[f"{L_pl_aus}{r}"].value = (
             f'=IF(COUNTIFS(Detalle!${L_det_fecha}:${L_det_fecha},{L_pl_fecha}{r},'
@@ -746,15 +710,12 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
             f'Detalle!${L_det_clas}:${L_det_clas},"Injustificada")'
         )
         ws_plan[f"{L_pl_hinc}{r}"].value = f'=({L_pl_mr}{r}+{L_pl_ms}{r})/60'
-        # <- horas perdidas: si ausente injustificada => horas planificadas completas + incidencias
         ws_plan[f"{L_pl_hperd}{r}"].value = f'=IF({L_pl_aus}{r}=1,{L_pl_hplan}{r},0)+{L_pl_hinc}{r}'
 
     lock_all_cells(ws_plan)
     protect_sheet(ws_plan)
 
-    # -------------------------
-    # Cumplimiento por colaborador (usa RUT_key)
-    # -------------------------
+    # Cumplimiento
     ws_c = wb.create_sheet("Cumplimiento")
     base = pl[["RUT","RUT_key","Nombre del Colaborador","Supervisor","Área"]].drop_duplicates().copy()
     base = base.sort_values(["Nombre del Colaborador","RUT"]).reset_index(drop=True)
@@ -785,19 +746,16 @@ def build_excel(edited_df: pd.DataFrame, plan_long_df: pd.DataFrame, date_from: 
         ws_c[f"{L_c_tp}{r}"].value = f'=COUNTIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r})'
         ws_c[f"{L_c_ina}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r},Planificacion_long!${L_pl_aus}:${L_pl_aus})'
         ws_c[f"{L_c_hprog}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r},Planificacion_long!${L_pl_hplan}:${L_pl_hplan})'
-        ws_c[f"{L_c_hperd}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r},Planificacion_long!${L_pl_hperd}:{L_pl_hperd})'
+        ws_c[f"{L_c_hperd}{r}"].value = f'=SUMIF(Planificacion_long!${L_pl_rutk}:${L_pl_rutk},{L_c_rutk}{r},Planificacion_long!${L_pl_hperd}:${L_pl_hperd})'
         ws_c[f"{L_c_ausp}{r}"].value = f'=IF({L_c_hprog}{r}=0,"",{L_c_hperd}{r}/{L_c_hprog}{r})'
         ws_c[f"{L_c_ausp}{r}"].number_format = "0.00%"
-        # cumplimiento por turnos: 1 - (turnos con pérdida / turnos planificados)
-        ws_c[f"{L_c_cump}{r}"].value = f'=IF({L_c_tp}{r}=0,"",MAX(0,1-({L_c_ina}{r}/ {L_c_tp}{r})))'
+        ws_c[f"{L_c_cump}{r}"].value = f'=IF({L_c_tp}{r}=0,"",MAX(0,1-({L_c_ina}{r}/{L_c_tp}{r})))'
         ws_c[f"{L_c_cump}{r}"].number_format = "0.00%"
 
     lock_all_cells(ws_c)
     protect_sheet(ws_c)
 
-    # -------------------------
-    # KPIs diarios (matriz)
-    # -------------------------
+    # KPIs diarios
     ws_k = wb.create_sheet("KPIs_diarios")
     fechas = pd.date_range(date_from, date_to, freq="D").date.tolist()
 
@@ -841,7 +799,7 @@ excel_bytes = build_excel(edited, plan_long, date_from, date_to)
 
 st.subheader("Descarga")
 st.download_button(
-    "Descargar Excel (Inasistencias injustificadas impactan KPIs)",
+    "Descargar Excel (base manda = Planificación)",
     data=excel_bytes,
     file_name=f"reporte_ausentismo_incidencias_{date_from}_{date_to}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
