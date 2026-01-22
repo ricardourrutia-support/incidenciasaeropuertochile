@@ -3,102 +3,122 @@ import pandas as pd
 from datetime import datetime, timedelta
 import io
 
-# --- CONFIGURACIÓN Y ESTILOS ---
+# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Gestión de Ausentismo", page_icon="✈️", layout="wide")
 
 st.markdown("""
     <style>
     .block-container {padding-top: 1rem; padding-bottom: 5rem;}
+    .stAlert {padding: 0.5rem;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNCIONES DE NORMALIZACIÓN (NUEVO MOTOR) ---
+# --- FUNCIONES DE CARGA ROBUSTA (SOLUCIÓN DEFINITIVA) ---
 
-def normalizar_nombres_cols(df):
+def reparar_encabezados_buk(df):
     """
-    Renombra las columnas del DataFrame a un estándar común,
-    buscando coincidencias flexibles (ej. 'Fecha' -> 'Fecha Entrada').
+    Detecta y repara el problema específico de las celdas combinadas de BUK.
+    Convierte: 'Entrada' -> 'Fecha Entrada', 'Unnamed: 11' -> 'Hora Entrada'.
     """
-    if df is None or df.empty:
-        return df
-
-    # Mapa de búsqueda: {Nombre_Estandar: [Lista de Posibles Nombres en BUK]}
-    mapa = {
-        'Fecha Entrada': ['fecha entrada', 'fecha', 'dia', 'día', 'date'],
-        'Hora Entrada': ['hora entrada', 'entrada', 'hora inicio', 'inicio', 'marcado entrada'],
-        'Hora Salida': ['hora salida', 'salida', 'hora fin', 'fin', 'marcado salida'],
-        'Turno': ['turno', 'jornada', 'horario'],
-        'Especialidad': ['especialidad', 'cargo', 'puesto', 'job'],
-        'Nombre': ['nombre', 'nombres', 'name'],
-        'Primer Apellido': ['primer apellido', 'apellido paterno', 'apellido 1', 'last name'],
-        'RUT': ['rut', 'dni', 'identificación'],
-        'Dentro del Recinto (Entrada)': ['dentro del recinto (entrada)', 'recinto entrada', 'zona entrada'],
-        'Dentro del Recinto (Salida)': ['dentro del recinto (salida)', 'recinto salida', 'zona salida']
-    }
-
-    # Crear diccionario de renombrado
-    nuevo_cols = {}
-    cols_existentes = {c.lower().strip(): c for c in df.columns} # Mapa minuscula -> nombre real
-
-    for estandar, posibles in mapa.items():
-        for candidato in posibles:
-            candidato_clean = candidato.lower().strip()
-            # Buscar coincidencia exacta o parcial
-            matches = [real for k, real in cols_existentes.items() if candidato_clean == k]
-            
-            if matches:
-                nuevo_cols[matches[0]] = estandar
-                break # Encontramos una, pasamos a la siguiente columna estándar
-
-    # Aplicar renombrado
-    df_renombrado = df.rename(columns=nuevo_cols)
-    return df_renombrado
-
-def detectar_encabezados_y_cargar(uploaded_file):
-    """Carga inteligente detectando la fila de cabecera."""
-    if uploaded_file is None: return None
+    columnas_nuevas = {}
+    cols = df.columns.tolist()
     
-    es_csv = uploaded_file.name.endswith('.csv')
+    # 1. Mapeo Posicional (Lo más seguro para este reporte)
+    # Buscamos patrones conocidos en los nombres que arroja pandas al leer row 0
+    for i, col in enumerate(cols):
+        c_clean = str(col).strip().lower()
+        
+        # Caso Columna 'Entrada' (que en realidad es la Fecha)
+        if c_clean == 'entrada':
+            columnas_nuevas[col] = 'Fecha Entrada'
+            # La columna siguiente suele ser la Hora (que viene como Unnamed o NaN)
+            if i + 1 < len(cols):
+                columnas_nuevas[cols[i+1]] = 'Hora Entrada'
+        
+        # Caso Columna 'Salida'
+        elif c_clean == 'salida':
+            columnas_nuevas[col] = 'Fecha Salida'
+            if i + 1 < len(cols):
+                columnas_nuevas[cols[i+1]] = 'Hora Salida'
+                
+        # Caso RUT Empleador vs RUT Colaborador
+        elif 'rut' in c_clean and 'empleador' not in c_clean:
+            columnas_nuevas[col] = 'RUT'
+            
+        elif 'dentro de recinto' in c_clean and 'entrada' in c_clean:
+            columnas_nuevas[col] = 'Dentro del Recinto (Entrada)'
+            
+        elif 'dentro de recinto' in c_clean and 'salida' in c_clean:
+            columnas_nuevas[col] = 'Dentro del Recinto (Salida)'
+
+    # Aplicar renombrado detectado
+    if columnas_nuevas:
+        df = df.rename(columns=columnas_nuevas)
+    
+    return df
+
+def cargar_datos_inteligente(uploaded_file):
+    if uploaded_file is None: return None, False
     
     try:
-        # Pre-lectura
+        # 1. Determinar formato y leer primeras filas para inspección
+        es_csv = uploaded_file.name.endswith('.csv')
+        
         if es_csv:
-            try: df_preview = pd.read_csv(uploaded_file, header=None, nrows=10)
+            try: df_raw = pd.read_csv(uploaded_file, header=None, nrows=15)
             except: 
                 uploaded_file.seek(0)
-                df_preview = pd.read_csv(uploaded_file, header=None, nrows=10, sep=';')
+                df_raw = pd.read_csv(uploaded_file, header=None, nrows=15, sep=';')
         else:
-            df_preview = pd.read_excel(uploaded_file, header=None, nrows=10)
-        
-        # Buscar fila con palabras clave
-        palabras_clave = ['RUT', 'TURNO', 'NOMBRE'] # Palabras muy comunes
-        fila_header = 0
-        encontrado = False
-        
-        for i, row in df_preview.iterrows():
+            df_raw = pd.read_excel(uploaded_file, header=None, nrows=15)
+
+        # 2. Buscar la fila REAL de encabezados
+        # Buscamos donde aparezcan "RUT" y "TURNO" en la misma fila
+        fila_header = -1
+        for i, row in df_raw.iterrows():
             fila_txt = " ".join(row.astype(str)).upper()
-            if sum(1 for p in palabras_clave if p in fila_txt) >= 2:
+            if "RUT" in fila_txt and "TURNO" in fila_txt:
                 fila_header = i
-                encontrado = True
                 break
         
-        # Carga real
+        if fila_header == -1:
+            st.error(f"No se detectaron encabezados válidos en {uploaded_file.name}. Buscando 'RUT' y 'TURNO'.")
+            return None, False
+
+        # 3. Cargar archivo desde esa fila
         uploaded_file.seek(0)
         if es_csv:
-            try: df_final = pd.read_csv(uploaded_file, header=fila_header)
+            try: df = pd.read_csv(uploaded_file, header=fila_header)
             except: 
                 uploaded_file.seek(0)
-                df_final = pd.read_csv(uploaded_file, header=fila_header, sep=';')
+                df = pd.read_csv(uploaded_file, header=fila_header, sep=';')
         else:
-            df_final = pd.read_excel(uploaded_file, header=fila_header)
-            
-        return df_final, encontrado
+            df = pd.read_excel(uploaded_file, header=fila_header)
+
+        # 4. REPARACIÓN CRÍTICA BUK
+        # Si vemos columnas llamadas "Entrada" y "Unnamed", aplicamos el parche
+        df = reparar_encabezados_buk(df)
         
+        # 5. Normalización adicional (por seguridad)
+        mapa_extra = {
+            'Especialidad': ['cargo', 'puesto'],
+            'Nombre': ['nombres'],
+            'Turno': ['jornada', 'horario']
+        }
+        cols_map = {}
+        for real_col in df.columns:
+            for estandar, variantes in mapa_extra.items():
+                if real_col.lower().strip() in variantes:
+                    cols_map[real_col] = estandar
+        df = df.rename(columns=cols_map)
+        
+        return df, True
+
     except Exception as e:
-        st.error(f"Error procesando archivo: {e}")
+        st.error(f"Error procesando {uploaded_file.name}: {e}")
         return None, False
 
-# --- FUNCIONES LÓGICA NEGOCIO ---
+# --- FUNCIONES DE CÁLCULO ---
 
 def parsear_turno(str_turno):
     try:
@@ -109,28 +129,29 @@ def parsear_turno(str_turno):
 
 def calcular_minutos_exactos(row):
     try:
-        turno = row.get('Turno')
-        hora_real = row.get('Hora Entrada')
+        # Extraer datos usando nombres normalizados
         fecha = row.get('Fecha Entrada')
-        
-        if pd.isna(hora_real) or str(hora_real).strip() in ['-', '', 'nan', 'NaT']: return 0
+        hora = row.get('Hora Entrada')
+        turno = row.get('Turno')
+
+        if pd.isna(hora) or str(hora).strip() in ['-', '', 'nan', 'NaT']: return 0
         
         t_ini, t_fin = parsear_turno(turno)
         if t_ini is None: return 0
-
-        # Fecha
+        
+        # Parsear Fecha
         if isinstance(fecha, str):
             fecha_dt = pd.to_datetime(fecha, dayfirst=True).date()
         else:
             fecha_dt = fecha.date() if hasattr(fecha, 'date') else fecha
 
-        # Hora
-        h_str = str(hora_real).strip()
+        # Parsear Hora
+        h_str = str(hora).strip()
         try: h_real = datetime.strptime(h_str, "%H:%M:%S").time()
         except: 
             try: h_real = datetime.strptime(h_str, "%H:%M").time()
             except: return 0
-        
+            
         dt_teorico = datetime.combine(fecha_dt, t_ini)
         
         # Lógica Nocturna
@@ -144,146 +165,108 @@ def calcular_minutos_exactos(row):
     except:
         return 0
 
-def formatear_detalle_entrada(row, tolerancia):
-    hora_real = row.get('Hora Entrada')
-    recinto = row.get('Dentro del Recinto (Entrada)', 'N/D')
+def formatear_detalle(row, tipo='entrada', tolerancia=0):
+    col_fecha = 'Fecha Entrada' if tipo == 'entrada' else 'Fecha Salida'
+    col_hora = 'Hora Entrada' if tipo == 'entrada' else 'Hora Salida'
+    col_recinto = 'Dentro del Recinto (Entrada)' if tipo == 'entrada' else 'Dentro del Recinto (Salida)'
     
-    if pd.isna(hora_real) or str(hora_real).strip() in ['-', '', 'nan']:
-        return "Sin Marcaje [No registró entrada]"
+    hora = row.get(col_hora)
+    recinto = row.get(col_recinto, 'N/D')
     
-    minutos = calcular_minutos_exactos(row)
-    h_str = str(hora_real).strip()[:5]
+    if pd.isna(hora) or str(hora).strip() in ['-', '', 'nan']:
+        return "Sin Marcaje"
     
-    estado = f"{minutos} min retraso" if minutos > tolerancia else "OK"
-    return f"Recinto: {recinto} | Hora: {h_str} [{estado}]"
+    h_str = str(hora).strip()[:5]
+    
+    if tipo == 'entrada':
+        mins = calcular_minutos_exactos(row)
+        estado = f"{mins} min retraso" if mins > tolerancia else "OK"
+        return f"Recinto: {recinto} | Hora: {h_str} [{estado}]"
+    else:
+        return f"Recinto: {recinto} | Hora: {h_str}"
 
-def formatear_detalle_salida(row):
-    hora_salida = row.get('Hora Salida')
-    recinto = row.get('Dentro del Recinto (Salida)', 'N/D')
-    if pd.isna(hora_salida) or str(hora_salida).strip() in ['-', '', 'nan']:
-        return f"Recinto: {recinto} | Hora: Sin Marca"
-    return f"Recinto: {recinto} | Hora: {str(hora_salida)[:5]}"
+# --- INTERFAZ ---
 
-def determinar_tipo_preliminar(row, tolerancia):
-    if pd.isna(row.get('Hora Entrada')) or str(row.get('Hora Entrada')).strip() in ['-', '', 'nan']:
-        return "Inasistencia"
-    if calcular_minutos_exactos(row) > tolerancia:
-        return "Incidencia"
-    return "OK"
-
-# --- MAIN ---
-
-st.title("✈️ Plataforma de Gestión Operativa")
-st.markdown("---")
+st.title("✈️ Plataforma de Gestión Operativa (BUK Fixed)")
 
 with st.sidebar:
-    st.header("1. Inputs")
-    file_asist = st.file_uploader("Reporte Asistencia", type=["xls", "xlsx", "csv"])
-    file_ina = st.file_uploader("Reporte Inasistencias", type=["xls", "xlsx", "csv"])
+    st.header("1. Carga de Archivos")
+    f_asist = st.file_uploader("Asistencia", type=["xls", "xlsx", "csv"])
+    f_ina = st.file_uploader("Inasistencias", type=["xls", "xlsx", "csv"])
     st.divider()
-    tolerancia = st.number_input("Tolerancia (min)", value=15, min_value=0)
+    tolerancia = st.number_input("Tolerancia (min)", 15)
 
-if file_asist and file_ina:
-    # 1. Carga
-    df_a, ok_a = detectar_encabezados_y_cargar(file_asist)
-    df_i, ok_i = detectar_encabezados_y_cargar(file_ina)
+if f_asist and f_ina:
+    df_a, ok_a = cargar_datos_inteligente(f_asist)
+    df_i, ok_i = cargar_datos_inteligente(f_ina)
     
     if ok_a and ok_i:
-        # 2. NORMALIZACIÓN DE COLUMNAS (Aquí ocurre la magia)
-        df_a = normalizar_nombres_cols(df_a)
-        df_i = normalizar_nombres_cols(df_i)
+        # Filtros
+        specs = sorted(list(set(df_a['Especialidad'].dropna()) | set(df_i['Especialidad'].dropna())))
+        sel_specs = st.sidebar.multiselect("Especialidad", specs, default=specs)
         
-        # Validar columnas críticas post-normalización
-        req_cols = ['Especialidad', 'Turno'] # Mínimo necesario
-        missing_a = [c for c in req_cols if c not in df_a.columns]
+        df_a = df_a[df_a['Especialidad'].isin(sel_specs)].copy()
+        df_i = df_i[df_i['Especialidad'].isin(sel_specs)].copy()
         
-        if missing_a:
-            st.error(f"Faltan columnas clave en Asistencia: {missing_a}. Columnas encontradas: {df_a.columns.tolist()}")
-        else:
-            # 3. Filtros
-            all_specs = sorted(list(set(df_a['Especialidad'].dropna()) | set(df_i['Especialidad'].dropna())))
-            selected_specs = st.sidebar.multiselect("Filtrar Especialidad", all_specs, default=all_specs)
+        # Preparar Inasistencias
+        df_i['Origen'] = 'Inasistencia'
+        if 'Día' in df_i.columns: df_i['Fecha Entrada'] = df_i['Día']
+        
+        # Unificar
+        cols = ['RUT', 'Nombre', 'Primer Apellido', 'Especialidad', 'Turno', 
+                'Fecha Entrada', 'Hora Entrada', 'Fecha Salida', 'Hora Salida',
+                'Dentro del Recinto (Entrada)', 'Dentro del Recinto (Salida)']
+        
+        # Asegurar columnas
+        for c in cols:
+            if c not in df_a.columns: df_a[c] = None
+            if c not in df_i.columns: df_i[c] = None
             
-            df_a = df_a[df_a['Especialidad'].isin(selected_specs)].copy()
-            df_i = df_i[df_i['Especialidad'].isin(selected_specs)].copy()
+        df_master = pd.concat([df_a, df_i], ignore_index=True)
+        
+        # Cálculos Finales
+        df_master['Colaborador'] = df_master['Nombre'].astype(str) + " " + df_master['Primer Apellido'].astype(str)
+        df_master['Minutos Incidencia'] = df_master.apply(calcular_minutos_exactos, axis=1)
+        df_master['Detalle Entrada'] = df_master.apply(lambda x: formatear_detalle(x, 'entrada', tolerancia), axis=1)
+        df_master['Detalle Salida'] = df_master.apply(lambda x: formatear_detalle(x, 'salida'), axis=1)
+        
+        # Clasificación
+        def clasificar(row):
+            if pd.isna(row.get('Hora Entrada')) and row.get('Origen') == 'Inasistencia': return 'Ausencia'
+            if pd.isna(row.get('Hora Entrada')): return 'Ausencia' # Caso asistencia vacía
+            if row['Minutos Incidencia'] > tolerancia: return 'Retraso'
+            return 'OK'
+            
+        df_master['Clasificación'] = df_master.apply(clasificar, axis=1)
+        df_master['Justificación'] = 'Injustificado'
+        
+        # Tabla
+        cols_view = ['Colaborador', 'Fecha Entrada', 'Turno', 'Detalle Entrada', 'Detalle Salida', 
+                     'Clasificación', 'Justificación', 'Minutos Incidencia']
+        
+        st.subheader("📝 Validación")
+        edited = st.data_editor(
+            df_master[cols_view],
+            column_config={
+                "Colaborador": st.column_config.TextColumn(disabled=True),
+                "Fecha Entrada": st.column_config.TextColumn(disabled=True),
+                "Detalle Entrada": st.column_config.TextColumn(width="medium", disabled=True),
+                "Clasificación": st.column_config.SelectboxColumn(options=["OK", "Ausencia", "Retraso", "No Procede"], required=True),
+                "Justificación": st.column_config.SelectboxColumn(options=["Injustificado", "Justificado"], required=True),
+                "Minutos Incidencia": st.column_config.NumberColumn(min_value=0, step=1)
+            },
+            use_container_width=True, height=600, hide_index=True
+        )
+        
+        # Exportar
+        st.divider()
+        if st.button("Generar Reporte Excel"):
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                edited.to_excel(writer, index=False)
+            st.download_button("📥 Descargar", buffer.getvalue(), "Reporte_Final.xlsx")
 
-            # 4. Unificación
-            df_a['Origen'] = 'Asistencia'
-            df_i['Origen'] = 'Inasistencia'
-            
-            # Si inasistencia no tiene Fecha Entrada pero tiene Día (por si falló normalización)
-            if 'Fecha Entrada' not in df_i.columns and 'Día' in df_i.columns:
-                 df_i['Fecha Entrada'] = df_i['Día']
-            
-            # Asegurar columnas vacías
-            cols_std = ['RUT', 'Nombre', 'Primer Apellido', 'Especialidad', 'Turno', 
-                        'Fecha Entrada', 'Hora Entrada', 'Hora Salida', 
-                        'Dentro del Recinto (Entrada)', 'Dentro del Recinto (Salida)', 'Origen']
-            
-            for c in cols_std:
-                if c not in df_a.columns: df_a[c] = None
-                if c not in df_i.columns: df_i[c] = None
-            
-            df_master = pd.concat([df_a[cols_std], df_i[cols_std]], ignore_index=True)
-
-            # 5. Cálculos
-            df_master['Colaborador'] = df_master['Nombre'].astype(str) + " " + df_master['Primer Apellido'].astype(str)
-            df_master['Minutos Incidencia'] = df_master.apply(calcular_minutos_exactos, axis=1)
-            df_master['Detalle Entrada'] = df_master.apply(lambda x: formatear_detalle_entrada(x, tolerancia), axis=1)
-            df_master['Detalle Salida'] = df_master.apply(formatear_detalle_salida, axis=1)
-            df_master['Tipo'] = df_master.apply(lambda x: determinar_tipo_preliminar(x, tolerancia), axis=1)
-            
-            def pre_clasificar(row):
-                if row['Tipo'] == 'Inasistencia': return 'Ausencia'
-                if 'retraso' in row['Detalle Entrada']: return 'Retraso'
-                return 'OK'
-
-            df_master['Clasificación'] = df_master.apply(pre_clasificar, axis=1)
-            df_master['Justificación'] = 'Injustificado'
-
-            # 6. Visualización
-            cols_ui = ['Colaborador', 'Fecha Entrada', 'Turno', 'Detalle Entrada', 'Detalle Salida',
-                       'Tipo', 'Clasificación', 'Justificación', 'Minutos Incidencia']
-            
-            st.subheader("📝 Detalle")
-            edited_df = st.data_editor(
-                df_master[cols_ui],
-                column_config={
-                    "Colaborador": st.column_config.TextColumn(disabled=True),
-                    "Fecha Entrada": st.column_config.TextColumn(disabled=True),
-                    "Turno": st.column_config.TextColumn(disabled=True),
-                    "Detalle Entrada": st.column_config.TextColumn(disabled=True, width="medium"),
-                    "Detalle Salida": st.column_config.TextColumn(disabled=True, width="medium"),
-                    "Tipo": st.column_config.TextColumn(disabled=True),
-                    "Clasificación": st.column_config.SelectboxColumn(options=["OK", "No Procede", "Ausencia", "Retraso", "Salida Anticipada", "Mixto"], required=True),
-                    "Justificación": st.column_config.SelectboxColumn(options=["Injustificado", "Justificado", "N.A."], required=True),
-                    "Minutos Incidencia": st.column_config.NumberColumn(min_value=0, step=1, required=True)
-                },
-                hide_index=True, use_container_width=True, height=600
-            )
-
-            # 7. KPI y Export
-            st.divider()
-            st.subheader("📊 KPIs")
-            df_kpi = edited_df[edited_df['Clasificación'] != 'No Procede']
-            
-            if not df_kpi.empty:
-                total = len(df_kpi)
-                mins = df_kpi[df_kpi['Justificación'] == 'Injustificado']['Minutos Incidencia'].sum()
-                probs = len(df_kpi[(df_kpi['Clasificación'] != 'OK') & (df_kpi['Justificación'] == 'Injustificado')])
-                cumplimiento = ((total - probs) / total) * 100
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Turnos", total)
-                c2.metric("Minutos Descuento", int(mins))
-                c3.metric("Cumplimiento", f"{cumplimiento:.1f}%")
-                
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                    edited_df.to_excel(writer, index=False, sheet_name='Detalle')
-                    df_kpi[df_kpi['Justificación'] == 'Injustificado'].to_excel(writer, index=False, sheet_name='Nomina')
-                st.download_button("💾 Excel", buffer.getvalue(), "Reporte.xlsx")
     else:
-        st.error("No se detectaron encabezados válidos.")
+        st.error("Error al leer archivos. Verifica el formato.")
 else:
-    st.info("Sube los archivos.")
+    st.info("Sube los archivos en el menú lateral.")
