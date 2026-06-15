@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><base target="_top">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{--bg:#0d1117;--panel:#151b24;--panel2:#1b2330;--line:#26303d;--ink:#e6edf3;--mut:#8b97a7;
+    --acc:#ffb000;--comp:#4cc9f0;--excl:#f72585;--dia:#ffd166;--noche:#5b8def;--sin:#586374;
+    --ok:#3ddc97;--bad:#ff6b6b;--meta:#b388ff;}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans',sans-serif;
+    background-image:radial-gradient(1200px 500px at 80% -10%, #1c2740 0%, transparent 60%);}
+  .wrap{max-width:1280px;margin:0 auto;padding:22px 20px 70px}
+  h1{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:30px;letter-spacing:-.02em;margin:0}
+  .sub{color:var(--mut);font-size:13px;margin-top:4px}
+  .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:18px 0 6px;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .fld{display:flex;flex-direction:column;gap:4px}
+  .fld label{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+  input,select,button,textarea{font-family:inherit;font-size:14px;background:var(--panel2);color:var(--ink);
+    border:1px solid var(--line);border-radius:9px;padding:8px 10px;outline:none}
+  button{cursor:pointer} button:hover{border-color:var(--acc)}
+  .btn-acc{background:var(--acc);color:#1a1300;border:none;font-weight:600}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden}
+  .card .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+  .card .v{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:25px;margin-top:6px}
+  .card .s{font-size:12px;color:var(--mut);margin-top:4px}
+  .card .tag{position:absolute;right:14px;top:14px;width:10px;height:10px;border-radius:50%}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:16px}
+  .panel h2{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:17px;margin:0 0 6px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  td.mono{font-family:'IBM Plex Mono',monospace}
+  .pill{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--mut)}
+  .mini{font-size:12px;padding:5px 10px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .legend{display:flex;gap:14px;font-size:12px;color:var(--mut);margin:6px 0 8px}
+  .barfill{height:7px;border-radius:4px;background:var(--line);overflow:hidden}
+  .barfill>i{display:block;height:100%}
+  .err{background:#3a1620;border:1px solid #5c2230;color:#ffd0d6;padding:12px 14px;border-radius:10px;margin-top:12px;font-size:13px}
+  .tag-rol{font-size:10px;padding:1px 7px;border-radius:20px;background:var(--panel2);border:1px solid var(--line);color:var(--mut)}
+  .scroll{max-height:330px;overflow:auto}
+  textarea{width:100%;min-height:120px;resize:vertical;font-family:'IBM Plex Mono',monospace;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px">
+    <div><h1>Seguimiento de Ventas · Aeropuerto</h1><div class="sub" id="rango">Cargando…</div></div>
+    <div class="pill" id="estado">·</div>
+  </div>
+
+  <div class="bar">
+    <div class="fld"><label>Desde</label><input type="date" id="from"></div>
+    <div class="fld"><label>Hasta</label><input type="date" id="to"></div>
+    <div class="fld"><label>Servicio</label><select id="product">
+      <option value="todas">Todas</option><option value="compartida">Compartida</option><option value="exclusiva">Exclusiva</option></select></div>
+    <div class="fld"><label>Equipo</label><select id="team">
+      <option value="todos">Todos</option><option value="Dia">Diurno</option><option value="Noche">Nocturno</option></select></div>
+    <div class="fld"><label>&nbsp;</label><button class="btn-acc" onclick="cargar()">Actualizar</button></div>
+  </div>
+
+  <div id="errbox"></div>
+  <div id="content" style="display:none">
+    <div class="cards" id="cards"></div>
+
+    <!-- METAS -->
+    <div class="panel">
+      <h2>Metas de venta <span class="pill">mensual</span></h2>
+      <div class="grid2">
+        <div>
+          <div class="fld" style="margin-bottom:10px"><label>Meta mensual total (CLP) — grupal (agentes y coordinadores)</label>
+            <input type="number" id="metaGrupo" placeholder="ej. 80000000"></div>
+          <div class="fld"><label>Meta personal por agente (CLP) — la misma para todos los agentes</label>
+            <input type="number" id="metaAgente" placeholder="ej. 3000000"></div>
+          <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+            <button class="btn-acc" onclick="guardarMetas()">Guardar metas</button>
+            <span class="sub" id="metaMsg"></span>
+          </div>
+        </div>
+        <div>
+          <div class="legend"><span><span class="dot" style="background:var(--acc)"></span>Avance grupal</span></div>
+          <div id="grupoMeta"></div>
+          <div class="legend" style="margin-top:14px"><span><span class="dot" style="background:var(--noche)"></span>Ventas</span><span><span class="dot" style="background:var(--meta)"></span>Meta por agente</span></div>
+          <canvas id="chartMeta" height="150"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRANJA -->
+    <div class="panel">
+      <h2>Ventas por franja horaria
+        <span style="display:inline-flex;gap:6px">
+          <span class="pill">compartida / exclusiva</span>
+          <button class="mini" onclick="bajar('franja')">CSV</button>
+        </span>
+      </h2>
+      <div class="legend"><span><span class="dot" style="background:var(--comp)"></span>Compartida</span><span><span class="dot" style="background:var(--excl)"></span>Exclusiva</span></div>
+      <canvas id="chart" height="92"></canvas>
+    </div>
+
+    <!-- PROMEDIO POR DIA DE SEMANA -->
+    <div class="panel">
+      <h2>Ventas promedio por día de la semana
+        <span style="display:inline-flex;gap:6px">
+          <span class="pill" id="semSub">promedio por día</span>
+          <button class="mini" onclick="bajar('semana')">CSV</button>
+        </span>
+      </h2>
+      <canvas id="chartSemana" height="88"></canvas>
+      <div class="sub" style="margin-top:6px">Promedio = ventas totales de ese día ÷ cantidad de ese día en el periodo seleccionado.</div>
+    </div>
+
+    <!-- EJECUTIVOS / COORDINADORES -->
+    <div class="grid2">
+      <div class="panel">
+        <h2>Ejecutivos <span style="display:flex;gap:6px"><span class="pill">vendedores</span><button class="mini" onclick="bajar('ejecutivos')">CSV</button></span></h2>
+        <div class="scroll"><table id="tEjec"><thead><tr><th>Ejecutivo</th><th>Ventas</th><th>Día</th><th>Noche</th><th>Meta</th><th>Avance</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="panel">
+        <h2>Coordinadores <span style="display:flex;gap:6px"><span class="pill">comisión por franja</span><button class="mini" onclick="bajar('coordinador')">CSV</button></span></h2>
+        <div class="sub" style="margin:-2px 0 8px">Reparto de la venta de cada franja activa (50/50 si hay 2).</div>
+        <table id="tCoord"><thead><tr><th>Coordinador</th><th>Día</th><th>Noche</th><th>Total</th><th>Viajes</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <!-- DESEMPENO -->
+    <div class="panel">
+      <h2>Desempeño de agentes
+        <span style="display:inline-flex;gap:6px;align-items:center">
+          <span class="pill" id="perfStamp">sin datos</span>
+          <button class="mini" onclick="actualizarPerf()" id="btnPerf">Actualizar desde Tableau</button>
+          <button class="mini" onclick="bajar('desempeno')">CSV</button>
+        </span>
+      </h2>
+      <div class="sub" style="margin:-2px 0 8px" id="perfNota">Promedios del periodo seleccionado (crosstab Performance Support).</div>
+      <div class="scroll"><table id="tPerf"><thead><tr><th>Agente</th><th>Rol</th><th>Tickets</th><th>% CSAT</th><th>NPS</th><th>% FIRT ≤24h</th><th>% FURT ≤120h</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <!-- OTRAS / CORREOS -->
+    <div class="grid2">
+      <div class="panel">
+        <h2>Otras ventas <span style="display:flex;gap:6px"><span class="pill">supervisor · anfitrión · otro</span><button class="mini" onclick="bajar('otras')">CSV</button></span></h2>
+        <table id="tOtras"><thead><tr><th>Colaborador</th><th>Rol</th><th>Ventas</th><th>Viajes</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="panel">
+        <h2>Correos mal ingresados <span style="display:flex;gap:6px"><span class="pill">ds_user_email · compartida</span><button class="mini" onclick="bajar('correos')">CSV detalle</button></span></h2>
+        <div class="scroll"><table id="tCorreos"><thead><tr><th>Ejecutivo</th><th>Compartidas</th><th>Malos</th><th>% OK</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+    <!-- DATOS MAESTROS -->
+    <div class="panel">
+      <h2>Datos maestros (BUK) <span class="pill" id="maeStamp">sin sincronizar</span></h2>
+      <div class="sub" style="margin:-2px 0 10px">
+        <b>Actualizar datos maestros:</b> cargue la planilla de colaboradores activos disponible en BUK
+        para sincronizar automáticamente (archivo .xls, hoja "Trabajador"). Con esto la app reconoce a los
+        nuevos colaboradores (rol, nombre completo y supervisor) sin editar el Roster.
+      </div>
+      <input type="file" id="fileMaestros" accept=".xls,.xlsx" style="display:none" onchange="leerPlanilla(this)">
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn-acc" onclick="document.getElementById('fileMaestros').click()" id="btnMae">Cargar planilla…</button>
+        <span class="sub" id="maeMsg"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var DATA=null, chart=null, chartMeta=null, chartSemana=null;
+var CLP=function(n){return '$'+(Math.round(n||0)).toLocaleString('es-CL');};
+function p2(n){return (n<10?'0':'')+n;}
+function firstDay(){var d=new Date();return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-01';}
+function today(){var d=new Date();return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());}
+document.getElementById('from').value=firstDay();
+document.getElementById('to').value=today();
+
+function params(){return {from:document.getElementById('from').value,to:document.getElementById('to').value,
+  product:document.getElementById('product').value,team:document.getElementById('team').value};}
+
+function cargar(){
+  document.getElementById('estado').textContent='Cargando…';
+  document.getElementById('errbox').innerHTML='';
+  google.script.run
+    .withSuccessHandler(function(d){DATA=d;document.getElementById('content').style.display='block';
+      document.getElementById('estado').textContent='Actualizado';
+      document.getElementById('rango').textContent='Rango: '+d.rango.from+'  →  '+d.rango.to;
+      document.getElementById('metaGrupo').value=d.metas.grupo||'';
+      document.getElementById('metaAgente').value=d.metas.metaAgente||'';
+      render();})
+    .withFailureHandler(function(e){document.getElementById('estado').textContent='Error';
+      document.getElementById('errbox').innerHTML='<div class="err"><b>Error:</b> '+e.message+'<br>Revisa CONFIG (IDs y nombres de hoja) y la pestaña Roster.</div>';})
+    .getDashboard(params());
+}
+
+function guardarMetas(){
+  document.getElementById('metaMsg').textContent='Guardando…';
+  google.script.run.withSuccessHandler(function(){document.getElementById('metaMsg').textContent='Guardado ✓';cargar();})
+    .withFailureHandler(function(e){document.getElementById('metaMsg').textContent='Error: '+e.message;})
+    .saveMetas(Number(document.getElementById('metaGrupo').value)||0, Number(document.getElementById('metaAgente').value)||0);
+}
+
+function render(){
+  var k=DATA.kpis, totDN=(k.diaMonto+k.nocheMonto+k.sinMonto)||1;
+  document.getElementById('cards').innerHTML=
+    card('Ventas totales',CLP(k.totalVentas),k.nViajes+' viajes','var(--acc)')+
+    card('Compartida',CLP(k.compMonto),k.compN+' · '+pct(k.compMonto,k.totalVentas),'var(--comp)')+
+    card('Exclusiva',CLP(k.exclMonto),k.exclN+' · '+pct(k.exclMonto,k.totalVentas),'var(--excl)')+
+    card('Equipo diurno',CLP(k.diaMonto),pct(k.diaMonto,totDN),'var(--dia)')+
+    card('Equipo nocturno',CLP(k.nocheMonto),pct(k.nocheMonto,totDN),'var(--noche)');
+
+  // ejecutivos
+  fill('tEjec',DATA.ejecutivos,function(e){
+    return '<td>'+e.nombre+'</td><td class="mono"><b>'+CLP(e.ventas)+'</b></td><td class="mono">'+CLP(e.dia)+
+      '</td><td class="mono">'+CLP(e.noche)+'</td><td class="mono">'+(e.meta?CLP(e.meta):'—')+'</td><td class="mono">'+av(e.avance)+'</td>';
+  },'Sin ventas de ejecutivos en el rango.',6);
+
+  // coordinadores
+  fill('tCoord',DATA.coordinadores,function(c){
+    return '<td>'+c.coordinador+'</td><td class="mono">'+CLP(c.dia)+'</td><td class="mono">'+CLP(c.noche)+
+      '</td><td class="mono"><b>'+CLP(c.total)+'</b></td><td class="mono">'+c.n+'</td>';
+  },'Sin coordinadores activos en el rango (revisa Turnos 360).',5);
+
+  // otras
+  fill('tOtras',DATA.otrasVentas,function(o){
+    return '<td>'+o.nombre+'</td><td><span class="tag-rol">'+o.rol+'</span></td><td class="mono">'+CLP(o.monto)+'</td><td class="mono">'+o.n+'</td>';
+  },'Sin otras ventas en el rango.',4);
+
+  // correos
+  fill('tCorreos',DATA.correosMal.porEjecutivo,function(m){
+    var p=m.pctOk==null?'—':Math.round(m.pctOk*100)+'%';
+    var col=m.pctOk!=null&&m.pctOk<0.8?'var(--bad)':'var(--ok)';
+    return '<td>'+m.nombre+'</td><td class="mono">'+m.total+'</td><td class="mono">'+m.malos+'</td><td class="mono" style="color:'+col+'">'+p+'</td>';
+  },'Sin datos de compartida en el rango.',4);
+
+  // desempeño
+  document.getElementById('perfStamp').textContent = DATA.desempeno.actualizado? ('actualizado '+DATA.desempeno.actualizado) : 'sin datos · pulsa Actualizar';
+  document.getElementById('perfNota').textContent = DATA.desempeno.sinFechas?
+    'La vista de Tableau entrega el agregado por agente (sin fechas): los valores corresponden al periodo publicado en la vista, no al filtro de este panel.' :
+    'Promedios del periodo seleccionado (crosstab Performance Support).';
+  // maestros
+  document.getElementById('maeStamp').textContent = DATA.maestros.actualizado? (DATA.maestros.total+' colaboradores · '+DATA.maestros.actualizado) : 'sin sincronizar';
+  var sinF=DATA.desempeno.sinFechas;
+  fill('tPerf',DATA.desempeno.lista,function(p){
+    var cs=p.csat==null?'—':Math.round(p.csat*100)+'%';
+    var csCol=p.csat!=null&&p.csat<0.8?'var(--bad)':'var(--ok)';
+    var np=p.nps==null?'—':p.nps;
+    var npCol=p.nps!=null&&p.nps<0?'var(--bad)':'var(--ok)';
+    function cum(x){ if(x==null) return '<td class="mono">—</td>';
+      var c=x<0.8?'var(--bad)':(x<0.95?'var(--acc)':'var(--ok)');
+      return '<td class="mono" style="color:'+c+'">'+Math.round(x*100)+'%</td>'; }
+    return '<td>'+p.nombre+'</td><td><span class="tag-rol">'+p.rol+'</span></td><td class="mono">'+(sinF?'—':p.tickets)+
+      '</td><td class="mono" style="color:'+csCol+'">'+cs+'</td><td class="mono" style="color:'+npCol+'">'+np+
+      '</td>'+cum(p.firt)+cum(p.furt);
+  },'Sin desempeño en el rango. Pulsa "Actualizar desde Tableau".',7);
+
+  // metas grupo
+  var mg=DATA.metas.grupo||0, av1=mg?Math.round(k.totalVentas/mg*100):0;
+  document.getElementById('grupoMeta').innerHTML=
+    '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><span>'+CLP(k.totalVentas)+' / '+(mg?CLP(mg):'sin meta')+'</span><b>'+(mg?av1+'%':'')+'</b></div>'+
+    '<div class="barfill"><i style="width:'+Math.min(av1,100)+'%;background:'+(av1>=100?'var(--ok)':'var(--acc)')+'"></i></div>';
+
+  renderChart(); renderSemana(); renderMeta();
+}
+
+function fill(id,arr,rowFn,empty,cols){
+  var tb=document.querySelector('#'+id+' tbody'); tb.innerHTML='';
+  if(!arr.length){tb.innerHTML='<tr><td colspan="'+cols+'" style="color:var(--mut)">'+empty+'</td></tr>';return;}
+  arr.forEach(function(x){tb.innerHTML+='<tr>'+rowFn(x)+'</tr>';});
+}
+function card(k,v,s,c){return '<div class="card"><span class="tag" style="background:'+c+'"></span><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';}
+function pct(a,b){return b?Math.round(a/b*100)+'%':'0%';}
+function av(x){if(x==null)return '—';var c=x>=1?'var(--ok)':(x>=0.7?'var(--acc)':'var(--bad)');return '<span style="color:'+c+'">'+Math.round(x*100)+'%</span>';}
+
+function renderChart(){
+  if(!DATA)return;
+  var labels=DATA.franjas.map(function(f){return p2(f.hora)+'h';});
+  var ds=[{label:'Compartida',data:DATA.franjas.map(function(f){return f.comp}),backgroundColor:'#4cc9f0'},
+          {label:'Exclusiva',data:DATA.franjas.map(function(f){return f.excl}),backgroundColor:'#f72585'}];
+  if(chart)chart.destroy();
+  chart=new Chart(document.getElementById('chart'),{type:'bar',data:{labels:labels,datasets:ds},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+CLP(c.parsed.y)}}}},
+      scales:{x:{stacked:true,grid:{display:false},ticks:{color:'#8b97a7',font:{size:10}}},
+        y:{stacked:true,grid:{color:'#26303d'},ticks:{color:'#8b97a7',callback:function(v){return '$'+(v/1000)+'k'}}}}}});
+}
+
+function renderSemana(){
+  if(!DATA)return;
+  var s=DATA.semana, labels=s.map(function(x){return x.dia;});
+  if(chartSemana)chartSemana.destroy();
+  chartSemana=new Chart(document.getElementById('chartSemana'),{type:'bar',
+    data:{labels:labels,datasets:[{label:'Promedio',data:s.map(function(x){return x.promedio}),backgroundColor:'#ffb000',borderRadius:4}]},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){
+      var d=s[c.dataIndex]; return ['Promedio: '+CLP(c.parsed.y),'Total: '+CLP(d.total)+'  ·  '+d.dias+' días  ·  '+d.n+' viajes'];}}}},
+      scales:{x:{grid:{display:false},ticks:{color:'#8b97a7'}},
+        y:{grid:{color:'#26303d'},ticks:{color:'#8b97a7',callback:function(v){return '$'+(v/1000)+'k'}}}}}});
+}
+
+function renderMeta(){
+  var meta=DATA.metas.metaAgente||0;
+  var rows=DATA.ejecutivos.map(function(e){return {n:e.nombre,v:e.ventas};});
+  var el=document.getElementById('chartMeta');
+  if(!rows.length||!meta){ if(chartMeta){chartMeta.destroy();chartMeta=null;} el.style.display='none'; return; }
+  rows.sort(function(a,b){return b.v-a.v;});
+  el.style.display='block';
+  if(chartMeta)chartMeta.destroy();
+  chartMeta=new Chart(el,{type:'bar',
+    data:{labels:rows.map(function(r){return r.n}),
+      datasets:[{label:'Ventas',data:rows.map(function(r){return r.v}),
+        backgroundColor:rows.map(function(r){return r.v>=meta?'#3ddc97':'#5b8def'})},
+        {label:'Meta',data:rows.map(function(){return meta}),type:'line',borderColor:'#b388ff',
+        borderWidth:2,borderDash:[5,4],pointRadius:0,fill:false}]},
+    options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+CLP(c.parsed.x)}}}},
+      scales:{x:{grid:{color:'#26303d'},ticks:{color:'#8b97a7',callback:function(v){return '$'+(v/1000000)+'M'}}},
+              y:{grid:{display:false},ticks:{color:'#8b97a7',font:{size:11}}}}}});
+}
+
+function leerPlanilla(inp){
+  var f=inp.files&&inp.files[0]; if(!f) return;
+  var msg=document.getElementById('maeMsg'), btn=document.getElementById('btnMae');
+  msg.textContent='Leyendo '+f.name+'…'; btn.disabled=true;
+  var rd=new FileReader();
+  rd.onload=function(e){
+    try{
+      var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      var wsName=wb.SheetNames.indexOf('Trabajador')>=0?'Trabajador':wb.SheetNames[0];
+      var aoa=XLSX.utils.sheet_to_json(wb.Sheets[wsName],{header:1,defval:''});
+      // fila de encabezados: la que contiene 'Nombre' y 'Primer Apellido'
+      var hr=-1;
+      for(var i=0;i<Math.min(12,aoa.length);i++){
+        var fila=aoa[i].map(function(x){return String(x).trim();});
+        if(fila.indexOf('Nombre')>=0 && fila.indexOf('Primer Apellido')>=0){hr=i;break;}
+      }
+      if(hr<0) throw new Error('No encontré la fila de encabezados (Nombre / Primer Apellido) en la hoja "'+wsName+'".');
+      var H=aoa[hr].map(function(x){return String(x).trim();});
+      function ci(n){return H.indexOf(n);}
+      var iN=ci('Nombre'), iA1=ci('Primer Apellido'), iA2=ci('Segundo Apellido'),
+          iEs=ci('Especialidad'), iSu=ci('Supervisor');
+      var regs=[];
+      for(var r=hr+1;r<aoa.length;r++){
+        var nom=String(aoa[r][iN]||'').trim(), a1=String(aoa[r][iA1]||'').trim();
+        if(!nom||!a1) continue;
+        regs.push({nombre:nom, ap1:a1, ap2:iA2>=0?String(aoa[r][iA2]||'').trim():'',
+          especialidad:iEs>=0?String(aoa[r][iEs]||'').trim():'', supervisor:iSu>=0?String(aoa[r][iSu]||'').trim():''});
+      }
+      if(!regs.length) throw new Error('La planilla no trae colaboradores con Nombre y Primer Apellido.');
+      msg.textContent='Sincronizando '+regs.length+' colaboradores…';
+      google.script.run.withSuccessHandler(function(res){
+        btn.disabled=false; inp.value='';
+        msg.textContent='✓ Sincronizado: '+res.total+' colaboradores ('+res.nuevos+' nuevos) · '+res.actualizado;
+        cargar();
+      }).withFailureHandler(function(err){
+        btn.disabled=false; inp.value='';
+        msg.textContent='Error: '+err.message;
+      }).sincronizarMaestros(regs);
+    }catch(ex){ btn.disabled=false; inp.value=''; msg.textContent='Error al leer el archivo: '+ex.message; }
+  };
+  rd.onerror=function(){ btn.disabled=false; msg.textContent='No se pudo leer el archivo.'; };
+  rd.readAsArrayBuffer(f);
+}
+
+function actualizarPerf(){
+  var b=document.getElementById('btnPerf'); b.disabled=true; b.textContent='Descargando…';
+  google.script.run.withSuccessHandler(function(r){
+    b.disabled=false; b.textContent='Actualizar desde Tableau';
+    document.getElementById('perfStamp').textContent='actualizado '+r.actualizado+' · '+r.filas+' filas';
+    cargar();
+  }).withFailureHandler(function(e){
+    b.disabled=false; b.textContent='Actualizar desde Tableau';
+    alert('Error al actualizar desde Tableau: '+e.message);
+  }).actualizarPerformance();
+}
+
+function bajar(tipo){
+  document.getElementById('estado').textContent='Generando CSV…';
+  google.script.run.withSuccessHandler(function(csv){
+    document.getElementById('estado').textContent='Actualizado';
+    var blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download='ventas_'+tipo+'_'+params().from+'_'+params().to+'.csv';a.click();
+  }).withFailureHandler(function(e){alert('Error al exportar: '+e.message);}).exportCSV(tipo,params());
+}
+
+cargar();
+</script>
+</body>
+</html>
