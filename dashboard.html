@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CSAT & NPS Tracker B2B — Cabify</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --purple:       #7145D6;
+  --purple-dark:  #44307A;
+  --purple-deep:  #2D1E56;
+  --purple-light: #9B7AE8;
+  --purple-pale:  #EDE8F9;
+  --purple-bg:    #F5F2FC;
+  --bg:           #FFFFFF;
+  --surface:      #F8F7FC;
+  --surface2:     #EDE8F9;
+  --border:       #D9D0F0;
+  --border-light: #EDE8F9;
+  --text:         #1A1033;
+  --text-mid:     #3D2B7A;
+  --muted:        #7A6A9E;
+  --muted-light:  #B0A3CC;
+  --green:        #0E9F6E;
+  --green-bg:     #ECFDF5;
+  --green-border: #A7F3D0;
+  --red:          #DC2626;
+  --red-bg:       #FEF2F2;
+  --red-border:   #FECACA;
+  --yellow:       #D97706;
+  --yellow-bg:    #FFFBEB;
+  --yellow-border:#FDE68A;
+  --radius:       10px;
+  --radius-lg:    14px;
+  --shadow-sm:    0 1px 3px rgba(68,48,122,.08), 0 1px 2px rgba(68,48,122,.06);
+  --shadow-md:    0 4px 12px rgba(68,48,122,.10), 0 2px 4px rgba(68,48,122,.06);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--surface); color: var(--text); font-family: 'Mulish', system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+
+header { background: var(--purple-deep); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; height: 58px; border-bottom: 3px solid var(--purple); }
+.logo-area { display: flex; align-items: center; gap: 12px; }
+.logo-box { width: 34px; height: 34px; background: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.logo-box svg { width: 20px; height: 20px; }
+.header-titles h1 { font-size: 15px; font-weight: 800; color: #fff; letter-spacing: -.2px; }
+.header-titles p  { font-size: 11px; color: rgba(255,255,255,.55); margin-top: 1px; font-weight: 400; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.upd-tag { font-size: 11px; font-weight: 600; color: rgba(255,255,255,.55); background: rgba(255,255,255,.08); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(255,255,255,.12); }
+.refresh-btn { background: var(--purple); border: none; color: white; padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 700; font-family: 'Mulish', sans-serif; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.refresh-btn:hover { background: var(--purple-light); }
+.refresh-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.tabs-bar { background: var(--bg); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; }
+.tab-btn { padding: 14px 22px; font-size: 13px; font-weight: 700; font-family: 'Mulish', sans-serif; cursor: pointer; background: none; border: none; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s; }
+.tab-btn.active { color: var(--purple); border-bottom-color: var(--purple); }
+.tab-btn:hover:not(.active) { color: var(--text-mid); }
+
+main { padding: 28px 32px; max-width: 1440px; margin: 0 auto; }
+.view { display: none; }
+
+.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 55vh; gap: 14px; }
+.spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--purple); border-radius: 50%; animation: spin .75s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-state p { color: var(--muted); font-size: 14px; font-weight: 600; }
+.error-box { background: var(--red-bg); border: 1px solid var(--red-border); border-radius: var(--radius); padding: 16px 20px; color: var(--red); font-weight: 600; margin-top: 20px; }
+
+/* ── SELECTOR TOP ── */
+.selector-bar { display: flex; align-items: center; gap: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 20px; margin-bottom: 20px; box-shadow: var(--shadow-sm); flex-wrap: wrap; }
+.selector-bar label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); white-space: nowrap; }
+.styled-select { background: var(--purple-bg); border: 1px solid var(--border); border-radius: 8px; padding: 7px 32px 7px 12px; color: var(--text); font-size: 13px; font-weight: 700; font-family: 'Mulish', sans-serif; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%237145D6' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; transition: border-color .15s; }
+.styled-select:focus { border-color: var(--purple); }
+.selector-divider { width: 1px; height: 28px; background: var(--border); }
+.mode-toggle { display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.mode-btn { padding: 7px 16px; font-size: 12px; font-weight: 800; font-family: 'Mulish', sans-serif; cursor: pointer; background: none; border: none; color: var(--muted); transition: all .12s; }
+.mode-btn.active { background: var(--purple); color: white; }
+.mode-btn:hover:not(.active) { background: var(--purple-pale); color: var(--purple-dark); }
+.period-badge { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--purple); background: var(--purple-pale); border: 1px solid var(--border); padding: 4px 12px; border-radius: 20px; white-space: nowrap; }
+
+/* ── KPIs ── */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.kpi-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
+.kpi-card::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--muted-light); }
+.kpi-card.green::after  { background: var(--green); }
+.kpi-card.red::after    { background: var(--red); }
+.kpi-card.yellow::after { background: var(--yellow); }
+.kpi-card.purple::after { background: var(--purple); }
+.kpi-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 10px; }
+.kpi-value { font-size: 36px; font-weight: 800; letter-spacing: -1.5px; line-height: 1; color: var(--text-mid); }
+.kpi-card.green  .kpi-value { color: var(--green); }
+.kpi-card.red    .kpi-value { color: var(--red); }
+.kpi-card.yellow .kpi-value { color: var(--yellow); }
+.kpi-card.purple .kpi-value { color: var(--purple-dark); }
+.kpi-sub { font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 6px; }
+
+/* ── SECTION TITLE ── */
+.section-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.section-title::before { content: ''; display: inline-block; width: 3px; height: 14px; background: var(--purple); border-radius: 2px; }
+
+/* ── CHARTS ROW ── */
+.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+@media (max-width: 860px) { .charts-row { grid-template-columns: 1fr; } }
+.chart-panel { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px 12px; box-shadow: var(--shadow-sm); }
+.chart-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.chart-panel-title { font-size: 12px; font-weight: 800; color: var(--text-mid); display: flex; align-items: center; gap: 7px; }
+.chart-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.chart-dot.csat { background: var(--purple); }
+.chart-dot.nps  { background: var(--green); }
+.line-chart-svg { width: 100%; display: block; overflow: visible; }
+
+/* ── PERIOD CARDS ── */
+.period-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-bottom: 28px; }
+.period-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 15px 17px; box-shadow: var(--shadow-sm); cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.period-card.selected { border-color: var(--purple); box-shadow: 0 0 0 2px var(--purple-pale), var(--shadow-md); }
+.period-card-label { font-size: 11px; font-weight: 800; color: var(--purple); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.period-badge-pill { background: var(--purple-pale); color: var(--purple-dark); font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); }
+.period-metrics { display: flex; gap: 10px; }
+.pm { flex: 1; }
+.pm-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--muted-light); margin-bottom: 3px; }
+.pm-val { font-size: 22px; font-weight: 800; letter-spacing: -.5px; }
+.pm-val.good { color: var(--green); }
+.pm-val.mid  { color: var(--yellow); }
+.pm-val.bad  { color: var(--red); }
+.pm-val.na   { color: var(--muted-light); font-size: 16px; }
+.pm-sub { font-size: 10px; font-weight: 600; color: var(--muted-light); margin-top: 2px; }
+
+/* ── AGENT TABLE ── */
+.table-wrap { overflow-x: auto; border-radius: var(--radius-lg); border: 1px solid var(--border); box-shadow: var(--shadow-sm); background: var(--bg); margin-bottom: 32px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: var(--surface); padding: 10px 14px; text-align: left; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); border-bottom: 2px solid var(--border); white-space: nowrap; }
+thead th:not(:last-child) { border-right: 1px solid var(--border-light); }
+tbody tr { border-top: 1px solid var(--border-light); transition: background .1s; }
+tbody tr:hover { background: var(--purple-bg); }
+tbody td { padding: 9px 14px; vertical-align: middle; }
+tbody td:not(:last-child) { border-right: 1px solid var(--border-light); }
+
+/* ── CHIPS ── */
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.chip-green  { background: var(--green-bg);    color: var(--green);      border: 1px solid var(--green-border); }
+.chip-red    { background: var(--red-bg);       color: var(--red);        border: 1px solid var(--red-border); }
+.chip-yellow { background: var(--yellow-bg);    color: var(--yellow);     border: 1px solid var(--yellow-border); }
+.chip-grey   { background: var(--surface2);     color: var(--muted);      border: 1px solid var(--border); }
+.chip-purple { background: var(--purple-pale);  color: var(--purple-dark); border: 1px solid var(--border); }
+
+/* ── DETALLE FILTERS ── */
+.filters-bar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; box-shadow: var(--shadow-sm); }
+.filter-group { display: flex; flex-direction: column; gap: 5px; }
+.filter-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+.filter-input { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; color: var(--text); font-size: 13px; font-weight: 600; font-family: 'Mulish', sans-serif; outline: none; transition: border-color .15s; }
+.filter-input:focus { border-color: var(--purple); background: var(--bg); }
+.filter-input::placeholder { color: var(--muted-light); }
+.seg-control { display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg-btn { padding: 7px 11px; font-size: 12px; font-weight: 700; font-family: 'Mulish', sans-serif; cursor: pointer; background: none; border: none; color: var(--muted); transition: all .12s; white-space: nowrap; border-right: 1px solid var(--border); }
+.seg-btn:last-child { border-right: none; }
+.seg-btn.active { background: var(--purple); color: white; }
+.seg-btn:hover:not(.active) { background: var(--purple-pale); color: var(--purple-dark); }
+
+.count-info { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 10px; }
+.empty-state { text-align: center; padding: 50px 20px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.ticket-num { font-family: monospace; font-size: 12px; font-weight: 700; color: var(--purple); }
+.tag-chain { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; font-size: 12px; color: var(--muted); }
+.tag-sep { opacity: .4; }
+.auto-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 5px; background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+.info-banner { background: var(--yellow-bg); border: 1px solid var(--yellow-border); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; font-weight: 600; color: var(--yellow); margin-bottom: 16px; display: none; }
+.excluded-banner { background: var(--purple-pale); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; font-weight: 600; color: var(--purple-dark); margin-bottom: 16px; display: none; }
+
+/* ── BOTONES DE ACCIÓN (tabla detalle) ── */
+.action-btn { border: 1px solid var(--border); background: var(--bg); border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 700; font-family: 'Mulish', sans-serif; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all .12s; white-space: nowrap; }
+.action-btn.delete { color: var(--red); }
+.action-btn.delete:hover { background: var(--red-bg); border-color: var(--red-border); }
+.action-btn.restore { color: var(--green); }
+.action-btn.restore:hover { background: var(--green-bg); border-color: var(--green-border); }
+.action-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+tr.row-excluded td { opacity: .55; }
+tr.row-excluded td:last-child { opacity: 1; }
+.excluded-meta { font-size: 10px; color: var(--muted-light); font-weight: 600; margin-top: 2px; }
+
+/* ── MODAL DE CONFIRMACIÓN ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(26,16,51,.45); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; backdrop-filter: blur(2px); }
+.modal-overlay.open { display: flex; }
+.modal-card { background: var(--bg); border-radius: var(--radius-lg); box-shadow: 0 20px 50px rgba(26,16,51,.30); max-width: 420px; width: 100%; padding: 26px 26px 22px; text-align: center; animation: modalIn .18s ease-out; }
+@keyframes modalIn { from { transform: translateY(10px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+.modal-icon { width: 52px; height: 52px; border-radius: 50%; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.modal-icon.danger  { background: var(--red-bg);   border: 1px solid var(--red-border); }
+.modal-icon.success { background: var(--green-bg); border: 1px solid var(--green-border); }
+.modal-card h3 { font-size: 16px; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+.modal-card p  { font-size: 13px; font-weight: 600; color: var(--muted); line-height: 1.55; margin-bottom: 20px; }
+.modal-card p .ticket-hl { font-family: monospace; font-weight: 800; color: var(--purple); }
+.modal-error { display: none; background: var(--red-bg); border: 1px solid var(--red-border); color: var(--red); border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 700; margin-bottom: 14px; }
+.modal-actions { display: flex; gap: 10px; justify-content: center; }
+.modal-btn { padding: 9px 20px; border-radius: 8px; font-size: 13px; font-weight: 800; font-family: 'Mulish', sans-serif; cursor: pointer; border: 1px solid transparent; transition: all .12s; min-width: 120px; }
+.modal-btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-cancel { background: var(--surface); border-color: var(--border); color: var(--text-mid); }
+.btn-cancel:hover:not(:disabled) { background: var(--surface2); }
+.btn-danger { background: var(--red); color: white; }
+.btn-danger:hover:not(:disabled) { background: #B91C1C; }
+.btn-success { background: var(--green); color: white; }
+.btn-success:hover:not(:disabled) { background: #0B8A5F; }
+
+/* ── TOAST ── */
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--purple-deep); color: white; padding: 11px 20px; border-radius: 10px; font-size: 13px; font-weight: 700; box-shadow: var(--shadow-md); opacity: 0; pointer-events: none; transition: all .25s; z-index: 1100; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-area">
+    <div class="logo-box">
+      <svg viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" fill="#7145D6"/>
+        <path d="M8 12.5C8 10.015 10.015 8 12.5 8C13.985 8 15.31 8.695 16.18 9.775L17.5 8.455C16.28 7.015 14.49 6.1 12.5 6.1C8.965 6.1 6.1 8.965 6.1 12.5C6.1 16.035 8.965 18.9 12.5 18.9C14.49 18.9 16.28 17.985 17.5 16.545L16.18 15.225C15.31 16.305 13.985 17 12.5 17C10.015 17 8 14.985 8 12.5Z" fill="white"/>
+      </svg>
+    </div>
+    <div class="header-titles">
+      <h1>CSAT &amp; NPS Tracker B2B</h1>
+      <p>Seguimiento de satisfacción · Agentes B2B</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="upd-tag" id="upd-tag">Cargando...</span>
+    <button class="refresh-btn" id="refresh-btn" onclick="loadData()">↻ Actualizar</button>
+  </div>
+</header>
+
+<div class="tabs-bar">
+  <button class="tab-btn active" onclick="switchTab('resumen',this)">📊 Resumen</button>
+  <button class="tab-btn"        onclick="switchTab('detalle',this)">🔍 Detalle de tickets</button>
+</div>
+
+<main>
+  <div class="loading-state" id="loading"><div class="spinner"></div><p>Conectando con Tableau...</p></div>
+  <div id="error-box" class="error-box" style="display:none;"></div>
+
+  <!-- ══ RESUMEN ══ -->
+  <div class="view" id="view-resumen" style="display:none;">
+
+    <!-- Barra de control única -->
+    <div class="selector-bar">
+      <label>Modo</label>
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="mode-btn-weekly"  onclick="setMode('weekly',this)">Semanal</button>
+        <button class="mode-btn"        id="mode-btn-monthly" onclick="setMode('monthly',this)">Mensual</button>
+      </div>
+      <div class="selector-divider"></div>
+      <label id="period-select-label">Semana</label>
+      <select class="styled-select" id="period-select" onchange="onPeriodChange()" style="min-width:230px;"></select>
+      <span class="period-badge" id="period-badge" style="display:none;"></span>
+    </div>
+
+    <div class="kpi-grid" id="kpi-resumen"></div>
+    <div class="info-banner" id="sin-semana-note"></div>
+    <div class="excluded-banner" id="excluded-note"></div>
+
+    <div class="section-title">Evolución de métricas</div>
+    <div class="charts-row">
+      <div class="chart-panel">
+        <div class="chart-panel-header">
+          <div class="chart-panel-title"><span class="chart-dot csat"></span> % CSAT</div>
+        </div>
+        <div id="csat-chart-area"></div>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-panel-header">
+          <div class="chart-panel-title"><span class="chart-dot nps"></span> NPS Score</div>
+        </div>
+        <div id="nps-chart-area"></div>
+      </div>
+    </div>
+
+    <div class="section-title" id="cards-section-title">Detalle por semana</div>
+    <div class="period-grid" id="period-grid"></div>
+
+    <div class="section-title">Rendimiento por agente</div>
+    <div class="table-wrap" id="agent-table-wrap"></div>
+  </div>
+
+  <!-- ══ DETALLE ══ -->
+  <div class="view" id="view-detalle" style="display:none;">
+    <div class="filters-bar">
+      <div class="filter-group">
+        <span class="filter-label">Agente</span>
+        <input type="text" class="filter-input" id="f-agent" placeholder="Buscar agente..." oninput="renderTable()" style="width:190px;">
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Semana</span>
+        <select class="filter-input" id="f-week" onchange="renderTable()" style="min-width:200px;"></select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Categoría</span>
+        <select class="filter-input" id="f-tag" onchange="renderTable()" style="min-width:160px;"></select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">CSAT</span>
+        <div class="seg-control">
+          <button class="seg-btn active" data-filter="csat" data-val="" onclick="setFilter('csat','',this)">Todos</button>
+          <button class="seg-btn" data-filter="csat" data-val="1"    onclick="setFilter('csat','1',this)">😊 Satisfecho</button>
+          <button class="seg-btn" data-filter="csat" data-val="0"    onclick="setFilter('csat','0',this)">😞 Insatisfecho</button>
+          <button class="seg-btn" data-filter="csat" data-val="null" onclick="setFilter('csat','null',this)">Sin respuesta</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">NPS</span>
+        <div class="seg-control">
+          <button class="seg-btn active" data-filter="nps" data-val="" onclick="setFilter('nps','',this)">Todos</button>
+          <button class="seg-btn" data-filter="nps" data-val="promotor"  onclick="setFilter('nps','promotor',this)">🟢 Promotor</button>
+          <button class="seg-btn" data-filter="nps" data-val="pasivo"    onclick="setFilter('nps','pasivo',this)">🟡 Pasivo</button>
+          <button class="seg-btn" data-filter="nps" data-val="detractor" onclick="setFilter('nps','detractor',this)">🔴 Detractor</button>
+          <button class="seg-btn" data-filter="nps" data-val="null"      onclick="setFilter('nps','null',this)">Sin respuesta</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Estado</span>
+        <div class="seg-control">
+          <button class="seg-btn active" data-filter="est" data-val=""         onclick="setFilter('est','',this)">✅ Activos</button>
+          <button class="seg-btn" data-filter="est" data-val="excluded" onclick="setFilter('est','excluded',this)">🗑 Excluidos</button>
+          <button class="seg-btn" data-filter="est" data-val="all"      onclick="setFilter('est','all',this)">Todos</button>
+        </div>
+      </div>
+    </div>
+    <div class="count-info" id="count-info"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#Ticket</th><th>Agente</th><th>CSAT</th><th>NPS</th>
+            <th>Categorización</th><th>Semana</th><th>Canal</th>
+            <th style="text-align:center">Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="detail-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- ══ MODAL DE CONFIRMACIÓN ══ -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-card">
+    <div class="modal-icon danger" id="modal-icon">🗑️</div>
+    <h3 id="modal-title">¿Eliminar ticket?</h3>
+    <p id="modal-text"></p>
+    <div class="modal-error" id="modal-error"></div>
+    <div class="modal-actions">
+      <button class="modal-btn btn-cancel" id="modal-cancel-btn" onclick="closeModal()">Cancelar</button>
+      <button class="modal-btn btn-danger" id="modal-confirm-btn" onclick="confirmModalAction()">Sí, eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TOAST ══ -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  UTILIDADES — declaradas primero
+// ═══════════════════════════════════════════════
+function avg(arr) {
+  if (!arr || !arr.length) return null;
+  const v = arr.filter(x => x !== null && x !== undefined && !isNaN(x));
+  return v.length ? v.reduce((a,b) => a+b, 0) / v.length : null;
+}
+
+const MESES_ES = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,octubre:10,noviembre:11,diciembre:12};
+
+function parseSpanishDate(str) {
+  if (!str) return null;
+  const m = str.toLowerCase().match(/(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/);
+  if (!m) return null;
+  const mes = MESES_ES[m[2]];
+  return mes ? new Date(+m[3], mes-1, +m[1]) : null;
+}
+
+function isoWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
+  const y = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+  return Math.ceil((((d-y)/86400000)+1)/7);
+}
+
+function monthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
+}
+function monthLabel(key) {
+  const [y,m] = key.split('-');
+  const names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  return `${names[+m-1]} ${y}`;
+}
+
+function fmtCsat(v) { return v !== null ? (v*100).toFixed(1)+'%' : '—'; }
+function fmtNps(v)  { return v !== null ? (+v).toFixed(0) : '—'; }
+
+function csatColorClass(v) {
+  if (v === null) return '';
+  return v >= .8 ? 'green' : v >= .6 ? 'yellow' : 'red';
+}
+function npsColorClass(v) {
+  if (v === null) return '';
+  return v >= 0 ? 'green' : 'red';
+}
+
+// Clasifica NPS de un ticket individual
+// Tableau entrega: 100 = Promotor, 0 = Pasivo, -100 = Detractor
+function npsCategory(nps) {
+  if (nps === null || nps === undefined) return 'null';
+  const n = Number(nps);
+  if (n === 100)  return 'promotor';
+  if (n === 0)    return 'pasivo';
+  if (n === -100) return 'detractor';
+  // Valores intermedios inesperados — clasificar por signo
+  if (n > 0)  return 'promotor';
+  if (n < 0)  return 'detractor';
+  return 'pasivo';
+}
+
+// ═══════════════════════════════════════════════
+//  ESTADO GLOBAL
+// ═══════════════════════════════════════════════
+let allData      = null;
+let activeTab    = 'resumen';
+let viewMode     = 'weekly';   // 'weekly' | 'monthly'
+let selectedPeriod = '';       // week string o monthKey
+let filters = { csat: '', nps: '', est: '' };   // est: '' = solo activos | 'excluded' | 'all'
+let pendingAction = null;                        // {type:'exclude'|'restore', id}
+
+// Datos derivados según modo
+let weeklyPoints  = [];   // [{label, key, count, avgCsat, avgNps, tickets:[]}]
+let monthlyPoints = [];
+
+// ═══════════════════════════════════════════════
+//  CARGA
+// ═══════════════════════════════════════════════
+function loadData() {
+  document.getElementById('loading').style.display      = 'flex';
+  document.getElementById('view-resumen').style.display = 'none';
+  document.getElementById('view-detalle').style.display = 'none';
+  document.getElementById('error-box').style.display    = 'none';
+  document.getElementById('refresh-btn').disabled       = true;
+  google.script.run
+    .withSuccessHandler(onLoaded)
+    .withFailureHandler(onError)
+    .getAllData();
+}
+
+function onLoaded(data) {
+  allData = data;
+  document.getElementById('loading').style.display  = 'none';
+  document.getElementById('refresh-btn').disabled   = false;
+  document.getElementById('upd-tag').textContent    = 'Act: ' + data.updatedAt;
+
+  if (data.sinSemana > 0) {
+    const n = document.getElementById('sin-semana-note');
+    n.style.display = 'block';
+    n.textContent = `ℹ️ ${data.sinSemana} ticket${data.sinSemana!==1?'s':''} sin fecha de semana — no se incluyen en tendencia, sí en el detalle.`;
+  }
+
+  updateExcludedBanner();
+  buildDerivedPoints();
+  buildPeriodSelect();
+  buildTagFilter();
+  buildWeekFilter();
+  renderResumen();
+  renderTable();
+  showActiveView();
+}
+
+function onError(err) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('refresh-btn').disabled  = false;
+  const el = document.getElementById('error-box');
+  el.style.display = 'block';
+  el.textContent   = '❌ ' + (err.message || err);
+}
+
+// ═══════════════════════════════════════════════
+//  CONSTRUIR PUNTOS SEMANALES Y MENSUALES
+//  desde allData.tickets (fuente de verdad)
+// ═══════════════════════════════════════════════
+function buildDerivedPoints() {
+  // Los tickets excluidos NO contribuyen a métricas, gráficos ni tablas de agentes
+  const tickets = allData.tickets.filter(t => !t.excluded);
+
+  // ── Semanal ──
+  const wMap = {};
+  tickets.forEach(t => {
+    if (!t.week) return;
+    if (!wMap[t.week]) {
+      const d = parseSpanishDate(t.week);
+      wMap[t.week] = {
+        label:   d ? 'W'+isoWeek(d) : t.week.slice(0,6),
+        key:     t.week,
+        sortKey: d ? d.getTime() : 0,
+        tickets: []
+      };
+    }
+    wMap[t.week].tickets.push(t);
+  });
+  weeklyPoints = Object.values(wMap)
+    .sort((a,b) => a.sortKey - b.sortKey)
+    .map(w => {
+      const cs = w.tickets.map(t=>t.csat).filter(v=>v!==null);
+      const ns = w.tickets.map(t=>t.nps).filter(v=>v!==null);
+      return { ...w, count: w.tickets.length, avgCsat: avg(cs), avgNps: avg(ns) };
+    });
+
+  // ── Mensual ──
+  const mMap = {};
+  tickets.forEach(t => {
+    if (!t.week) return;
+    const d = parseSpanishDate(t.week);
+    if (!d) return;
+    const k = monthKey(d);
+    if (!mMap[k]) mMap[k] = { label: monthLabel(k), key: k, sortKey: d.getTime(), tickets: [] };
+    // actualizar sortKey al primer día del mes
+    const firstOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+    if (firstOfMonth.getTime() < mMap[k].sortKey) mMap[k].sortKey = firstOfMonth.getTime();
+    mMap[k].tickets.push(t);
+  });
+  monthlyPoints = Object.values(mMap)
+    .sort((a,b) => a.sortKey - b.sortKey)
+    .map(m => {
+      const cs = m.tickets.map(t=>t.csat).filter(v=>v!==null);
+      const ns = m.tickets.map(t=>t.nps).filter(v=>v!==null);
+      return { ...m, count: m.tickets.length, avgCsat: avg(cs), avgNps: avg(ns) };
+    });
+}
+
+function activePoints() { return viewMode === 'weekly' ? weeklyPoints : monthlyPoints; }
+
+// ═══════════════════════════════════════════════
+//  TABS & MODO
+// ═══════════════════════════════════════════════
+function switchTab(tab, btn) {
+  activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  if (allData) showActiveView();
+}
+function showActiveView() {
+  document.getElementById('view-resumen').style.display = activeTab==='resumen' ? 'block' : 'none';
+  document.getElementById('view-detalle').style.display = activeTab==='detalle' ? 'block' : 'none';
+}
+
+function setMode(mode, btn) {
+  viewMode = mode;
+  selectedPeriod = '';
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('period-select-label').textContent = mode === 'weekly' ? 'Semana' : 'Mes';
+  document.getElementById('cards-section-title').textContent = mode === 'weekly' ? 'Detalle por semana' : 'Detalle por mes';
+  buildPeriodSelect();
+  renderResumen();
+}
+
+// ═══════════════════════════════════════════════
+//  SELECTOR DE PERÍODO
+// ═══════════════════════════════════════════════
+function buildPeriodSelect() {
+  const pts  = activePoints();
+  const sel  = document.getElementById('period-select');
+  const lbl  = viewMode === 'weekly' ? 'Todas las semanas' : 'Todos los meses';
+  sel.innerHTML = `<option value="">${lbl}</option>` +
+    pts.map(p => `<option value="${p.key}">${p.label}${viewMode==='weekly'?' — '+p.key:''}</option>`).join('');
+  sel.value = selectedPeriod;
+}
+
+function onPeriodChange() {
+  selectedPeriod = document.getElementById('period-select').value;
+  renderResumen();
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER RESUMEN — KPIs + gráficos + cards + tabla
+// ═══════════════════════════════════════════════
+function renderResumen() {
+  if (!allData) return;
+
+  const pts = activePoints();
+
+  // Tickets del período seleccionado (solo activos — los excluidos no cuentan)
+  const activeTickets = allData.tickets.filter(t => !t.excluded);
+  let periodTickets;
+  if (selectedPeriod) {
+    if (viewMode === 'weekly') {
+      periodTickets = activeTickets.filter(t => t.week === selectedPeriod);
+    } else {
+      periodTickets = activeTickets.filter(t => {
+        const d = t.week ? parseSpanishDate(t.week) : null;
+        return d && monthKey(d) === selectedPeriod;
+      });
+    }
+  } else {
+    periodTickets = activeTickets.filter(t => t.week);
+  }
+
+  // Badge
+  const badge = document.getElementById('period-badge');
+  if (selectedPeriod) {
+    const found = pts.find(p => p.key === selectedPeriod);
+    badge.style.display = 'inline-flex';
+    badge.textContent   = found ? `${found.label} · ${found.count} tickets` : selectedPeriod;
+  } else {
+    badge.style.display = 'none';
+  }
+
+  // KPIs desde tickets individuales (nunca desde promedios de promedios)
+  const csatArr = periodTickets.map(t=>t.csat).filter(v=>v!==null);
+  const npsArr  = periodTickets.map(t=>t.nps).filter(v=>v!==null);
+  const avgC    = avg(csatArr);
+  const avgN    = avg(npsArr);
+  const agents  = new Set(periodTickets.map(t=>t.agent).filter(Boolean));
+
+  document.getElementById('kpi-resumen').innerHTML = `
+    <div class="kpi-card ${csatColorClass(avgC) || 'purple'}">
+      <div class="kpi-label">CSAT promedio</div>
+      <div class="kpi-value">${fmtCsat(avgC)}</div>
+      <div class="kpi-sub">${csatArr.length} con respuesta · ${periodTickets.length - csatArr.length} sin respuesta</div>
+    </div>
+    <div class="kpi-card ${npsColorClass(avgN) || 'purple'}">
+      <div class="kpi-label">NPS promedio</div>
+      <div class="kpi-value">${fmtNps(avgN)}</div>
+      <div class="kpi-sub">${npsArr.length} con respuesta</div>
+    </div>
+    <div class="kpi-card purple">
+      <div class="kpi-label">Total tickets</div>
+      <div class="kpi-value">${periodTickets.length}</div>
+      <div class="kpi-sub">${selectedPeriod ? 'en el período' : 'en todos los períodos'}</div>
+    </div>
+    <div class="kpi-card purple">
+      <div class="kpi-label">Agentes activos</div>
+      <div class="kpi-value">${agents.size}</div>
+      <div class="kpi-sub">en el período</div>
+    </div>
+  `;
+
+  // Gráficos — mostrar últimos 12 puntos en semanal, todos en mensual
+  const chartPts = viewMode === 'weekly' ? pts.slice(-12) : pts;
+  renderLineChart('csat', chartPts);
+  renderLineChart('nps',  chartPts);
+
+  // Cards y tabla — usar puntos filtrados si hay selección
+  const cardPts = selectedPeriod ? pts.filter(p => p.key === selectedPeriod) : pts;
+  renderPeriodCards(cardPts);
+  renderAgentTable(cardPts);
+}
+
+// ═══════════════════════════════════════════════
+//  GRÁFICO DE LÍNEA SVG
+// ═══════════════════════════════════════════════
+function renderLineChart(metric, points) {
+  const areaId = metric === 'csat' ? 'csat-chart-area' : 'nps-chart-area';
+  const color  = metric === 'csat' ? '#7145D6' : '#0E9F6E';
+
+  if (!points.length) {
+    document.getElementById(areaId).innerHTML = `<p style="color:var(--muted);font-size:12px;padding:16px 0">Sin datos.</p>`;
+    return;
+  }
+
+  const vals = points.map(p => metric==='csat' ? p.avgCsat : p.avgNps).filter(v => v!==null);
+  if (!vals.length) {
+    document.getElementById(areaId).innerHTML = `<p style="color:var(--muted);font-size:12px;padding:16px 0">Sin valores para mostrar.</p>`;
+    return;
+  }
+
+  const W = 400, H = 185;
+  const pad = { t:26, r:16, b:28, l:46 };
+  const cW = W - pad.l - pad.r;
+  const cH = H - pad.t - pad.b;
+
+  let minV, maxV;
+  if (metric === 'csat') {
+    minV = 0; maxV = 1;
+  } else {
+    const spread = Math.max(...vals) - Math.min(...vals) || 20;
+    minV = Math.min(...vals) - spread * .25;
+    maxV = Math.max(...vals) + spread * .25;
+  }
+  if (minV === maxV) { minV -= 10; maxV += 10; }
+
+  const n    = points.length;
+  const xOf  = i => pad.l + (n === 1 ? cW/2 : i * cW/(n-1));
+  const yOf  = v => pad.t + cH - ((v - minV)/(maxV - minV)) * cH;
+  const fmtY = v => metric==='csat' ? (v*100).toFixed(0)+'%' : (+v).toFixed(0);
+
+  // Grid lines Y (4 ticks)
+  const ticks  = 4;
+  const yGrid  = Array.from({length: ticks+1}, (_,i) => minV + (maxV-minV)*i/ticks);
+  const gridSVG = yGrid.map(v => {
+    const y = yOf(v).toFixed(1);
+    return `<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#E5DFF5" stroke-width="0.8"/>
+            <text x="${pad.l-6}" y="${y}" text-anchor="end" dominant-baseline="central" font-size="9" font-family="Mulish,sans-serif" fill="#B0A3CC">${fmtY(v)}</text>`;
+  }).join('');
+
+  // Línea NPS = 0
+  const zeroLine = (metric === 'nps' && minV < 0 && maxV > 0)
+    ? `<line x1="${pad.l}" y1="${yOf(0).toFixed(1)}" x2="${W-pad.r}" y2="${yOf(0).toFixed(1)}" stroke="#DC2626" stroke-width="1" stroke-dasharray="4 3" opacity=".6"/>`
+    : '';
+
+  // Polyline
+  const linePts = points
+    .map((p,i) => { const v = metric==='csat'?p.avgCsat:p.avgNps; return v!==null ? `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}` : null; })
+    .filter(Boolean).join(' ');
+
+  // Área
+  const fi = points.findIndex(p => (metric==='csat'?p.avgCsat:p.avgNps) !== null);
+  const li = points.reduce((acc,p,i) => (metric==='csat'?p.avgCsat:p.avgNps)!==null?i:acc, -1);
+  const areaD = fi >= 0
+    ? `M${xOf(fi).toFixed(1)},${(pad.t+cH).toFixed(1)} ` +
+      points.slice(fi, li+1).map((p,j) => {
+        const v = metric==='csat'?p.avgCsat:p.avgNps;
+        return v!==null ? `L${xOf(fi+j).toFixed(1)},${yOf(v).toFixed(1)}` : '';
+      }).join(' ') +
+      ` L${xOf(li).toFixed(1)},${(pad.t+cH).toFixed(1)} Z`
+    : '';
+
+  // Labels eje X — todos si <= 12, si no cada 2
+  const step = n <= 12 ? 1 : Math.max(1, Math.floor(n/8));
+  const xLabels = points.map((p,i) => {
+    if (i % step !== 0 && i !== n-1) return '';
+    return `<text x="${xOf(i).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" font-family="Mulish,sans-serif" fill="#7A6A9E" font-weight="700">${p.label}</text>`;
+  }).join('');
+
+  // Puntos + etiquetas de valor encima/debajo según posición
+  const dotR = n > 15 ? 2.5 : 3.5;
+  const midY = pad.t + cH / 2;
+  const dots = points.map((p,i) => {
+    const v = metric==='csat'?p.avgCsat:p.avgNps;
+    if (v===null) return '';
+    const cx  = xOf(i);
+    const cy  = yOf(v);
+    const sel = selectedPeriod && p.key === selectedPeriod;
+    const lbl = fmtY(v);
+    // Etiqueta encima si el punto está en la mitad inferior del gráfico, abajo si está arriba
+    const lblY   = cy > midY ? cy - dotR - 5 : cy + dotR + 12;
+    const lblAnchor = 'middle';
+    return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${sel?5.5:dotR}"
+      fill="${sel?color:'white'}" stroke="${color}" stroke-width="${sel?0:2}" style="cursor:pointer"
+      onclick="selectPeriodFromChart('${p.key}')">
+      <title>${p.label}: ${lbl} (${p.count} tickets)</title></circle>
+    <text x="${cx.toFixed(1)}" y="${lblY.toFixed(1)}" text-anchor="${lblAnchor}"
+      font-size="9" font-weight="800" font-family="Mulish,sans-serif"
+      fill="${sel ? color : color}" opacity="${sel ? 1 : 0.85}">${lbl}</text>`;
+  }).join('');
+
+  document.getElementById(areaId).innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" class="line-chart-svg">
+      <defs>
+        <linearGradient id="grad-${metric}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${color}" stop-opacity="0.15"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>
+      ${gridSVG}
+      ${zeroLine}
+      ${areaD ? `<path d="${areaD}" fill="url(#grad-${metric})"/>` : ''}
+      <polyline points="${linePts}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      ${xLabels}
+    </svg>`;
+}
+
+function selectPeriodFromChart(key) {
+  selectedPeriod = selectedPeriod === key ? '' : key;
+  document.getElementById('period-select').value = selectedPeriod;
+  renderResumen();
+}
+
+// ═══════════════════════════════════════════════
+//  CARDS DE PERÍODO
+// ═══════════════════════════════════════════════
+function renderPeriodCards(pts) {
+  document.getElementById('period-grid').innerHTML = pts.map(p => {
+    const cc  = p.avgCsat === null ? 'na' : p.avgCsat >= .8 ? 'good' : p.avgCsat >= .6 ? 'mid' : 'bad';
+    const nc  = p.avgNps  === null ? 'na' : p.avgNps  >= 0  ? 'good' : 'bad';
+    const sel = selectedPeriod === p.key;
+    return `
+      <div class="period-card${sel?' selected':''}" onclick="selectPeriodFromChart('${p.key}')">
+        <div class="period-card-label">
+          <span class="period-badge-pill">${p.label}</span>
+          ${viewMode==='weekly' ? `<span style="font-size:10px;font-weight:600;color:var(--muted)">${p.key}</span>` : ''}
+        </div>
+        <div class="period-metrics">
+          <div class="pm">
+            <div class="pm-label">CSAT</div>
+            <div class="pm-val ${cc}">${fmtCsat(p.avgCsat)}</div>
+            <div class="pm-sub">${p.count} tickets</div>
+          </div>
+          <div class="pm">
+            <div class="pm-label">NPS</div>
+            <div class="pm-val ${nc}">${fmtNps(p.avgNps)}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+//  TABLA DE AGENTES
+// ═══════════════════════════════════════════════
+function renderAgentTable(pts) {
+  const wrap = document.getElementById('agent-table-wrap');
+  if (!pts.length) { wrap.innerHTML = ''; return; }
+
+  // Calcular métricas por agente desde los tickets de los períodos visibles
+  const agentMap = {};
+  pts.forEach(p => {
+    p.tickets.forEach(t => {
+      const name = t.agent || 'Sin asignar';
+      if (!agentMap[name]) agentMap[name] = { tickets: [], byPeriod: {} };
+      agentMap[name].tickets.push(t);
+      if (!agentMap[name].byPeriod[p.key]) agentMap[name].byPeriod[p.key] = [];
+      agentMap[name].byPeriod[p.key].push(t);
+    });
+  });
+
+  const agents = Object.entries(agentMap)
+    .filter(([name]) => name && name !== 'Sin asignar')
+    .map(([name, d]) => {
+      const cs = d.tickets.map(t=>t.csat).filter(v=>v!==null);
+      const ns = d.tickets.map(t=>t.nps).filter(v=>v!==null);
+      return { name, count: d.tickets.length, avgCsat: avg(cs), avgNps: avg(ns), byPeriod: d.byPeriod };
+    })
+    .sort((a,b) => b.count - a.count);
+
+  if (!agents.length) { wrap.innerHTML = ''; return; }
+
+  // Encabezados de período — máx 8 para no desbordar
+  const displayPts = pts.slice(-8);
+  const pHeaders = displayPts.map(p =>
+    `<th style="text-align:center;min-width:80px">${p.label}<br><span style="font-size:9px;font-weight:600;color:var(--muted-light)">${p.count}t</span></th>`
+  ).join('');
+
+  const chipCl = (v, isNps) => {
+    if (v === null) return 'chip-grey';
+    if (isNps) return v >= 0 ? 'chip-green' : 'chip-red';
+    return v >= .8 ? 'chip-green' : v >= .6 ? 'chip-yellow' : 'chip-red';
+  };
+
+  const rows = agents.map(a => {
+    const periodCells = displayPts.map(p => {
+      const ts = a.byPeriod[p.key] || [];
+      if (!ts.length) return `<td style="text-align:center;color:var(--muted-light)">—</td>`;
+      const cs = avg(ts.map(t=>t.csat).filter(v=>v!==null));
+      const ns = avg(ts.map(t=>t.nps).filter(v=>v!==null));
+      const cc = cs===null?'var(--muted-light)':cs>=.8?'var(--green)':cs>=.6?'var(--yellow)':'var(--red)';
+      const nc = ns===null?'var(--muted-light)':ns>=0?'var(--green)':'var(--red)';
+      return `<td style="text-align:center">
+        <div style="font-size:12px;font-weight:800;color:${cc}">${fmtCsat(cs)}</div>
+        <div style="font-size:11px;font-weight:700;color:${nc}">${fmtNps(ns)}</div>
+        <div style="font-size:9px;color:var(--muted-light)">${ts.length}t</div>
+      </td>`;
+    }).join('');
+
+    return `<tr>
+      <td style="font-weight:800;white-space:nowrap">${a.name}</td>
+      <td style="text-align:center"><span class="chip ${chipCl(a.avgCsat,false)}">${fmtCsat(a.avgCsat)}</span></td>
+      <td style="text-align:center"><span class="chip ${chipCl(a.avgNps,true)}">${fmtNps(a.avgNps)}</span></td>
+      <td style="text-align:center;color:var(--muted);font-weight:700">${a.count}</td>
+      ${periodCells}
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Agente</th>
+        <th style="text-align:center">CSAT</th>
+        <th style="text-align:center">NPS</th>
+        <th style="text-align:center">Tickets</th>
+        ${pHeaders}
+      </tr>
+      <tr>
+        <td style="padding:2px 14px"></td><td></td><td></td><td></td>
+        ${displayPts.map(()=>`<td style="text-align:center;padding:2px 14px;font-size:9px;color:var(--muted-light)">CSAT / NPS / #t</td>`).join('')}
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ═══════════════════════════════════════════════
+//  DETALLE DE TICKETS
+// ═══════════════════════════════════════════════
+function buildTagFilter() {
+  const tags = [...new Set(allData.tickets.map(t=>t.tag1).filter(Boolean))].sort();
+  document.getElementById('f-tag').innerHTML =
+    '<option value="">Todas las categorías</option>' +
+    tags.map(t=>`<option value="${t}">${t}</option>`).join('');
+}
+
+function buildWeekFilter() {
+  document.getElementById('f-week').innerHTML =
+    '<option value="">Todas las semanas</option>' +
+    weeklyPoints.map(w=>`<option value="${w.key}">${w.label} — ${w.key}</option>`).join('');
+}
+
+function setFilter(key, val, btn) {
+  filters[key] = val;
+  // Desactivar todos los botones del mismo grupo
+  btn.closest('.seg-control').querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTable();
+}
+
+function renderTable() {
+  if (!allData) return;
+
+  const search     = (document.getElementById('f-agent').value || '').toLowerCase().trim();
+  const tagFilter  = document.getElementById('f-tag').value;
+  const weekFilter = document.getElementById('f-week').value;
+  const csatF      = filters.csat;
+  const npsF       = filters.nps;
+  const estF       = filters.est;
+
+  const rows = allData.tickets.filter(t => {
+    // Normalizar: string vacío o undefined → null para comparaciones seguras
+    const csat = (t.csat === '' || t.csat === undefined || t.csat === null) ? null : Number(t.csat);
+    const nps  = (t.nps  === '' || t.nps  === undefined || t.nps  === null) ? null : Number(t.nps);
+
+    // Estado — por defecto solo activos
+    if (estF === ''         && t.excluded)  return false;
+    if (estF === 'excluded' && !t.excluded) return false;
+
+    if (search     && !(t.agent||'').toLowerCase().includes(search)) return false;
+    if (tagFilter  && t.tag1 !== tagFilter)  return false;
+    if (weekFilter && t.week !== weekFilter) return false;
+
+    // CSAT filter
+    if (csatF === '1'    && csat !== 1)    return false;
+    if (csatF === '0'    && csat !== 0)    return false;
+    if (csatF === 'null' && csat !== null) return false;
+
+    // NPS filter — categorías semánticas con valor normalizado
+    if (npsF === 'null'      && nps !== null)                    return false;
+    if (npsF === 'promotor'  && npsCategory(nps) !== 'promotor') return false;
+    if (npsF === 'pasivo'    && npsCategory(nps) !== 'pasivo')   return false;
+    if (npsF === 'detractor' && npsCategory(nps) !== 'detractor') return false;
+
+    return true;
+  });
+
+  const totalExcl = allData.tickets.filter(t => t.excluded).length;
+  document.getElementById('count-info').textContent =
+    `${rows.length} ticket${rows.length!==1?'s':''} encontrados de ${allData.tickets.length} totales` +
+    (totalExcl > 0 ? ` · ${totalExcl} excluido${totalExcl!==1?'s':''} de las métricas` : '');
+
+  if (!rows.length) {
+    document.getElementById('detail-tbody').innerHTML =
+      `<tr><td colspan="8"><div class="empty-state">Sin tickets para los filtros seleccionados.</div></td></tr>`;
+    return;
+  }
+
+  document.getElementById('detail-tbody').innerHTML = rows.map(t => {
+    // CSAT chip — Tableau entrega: 1 = Satisfecho, 0 = Insatisfecho, null = Sin respuesta
+    const csatVal = t.csat === null ? null : Number(t.csat);
+    let csatChip;
+    if      (csatVal === null) csatChip = `<span class="chip chip-grey">Sin respuesta</span>`;
+    else if (csatVal === 1)    csatChip = `<span class="chip chip-green">😊 Satisfecho</span>`;
+    else if (csatVal === 0)    csatChip = `<span class="chip chip-red">😞 Insatisfecho</span>`;
+    else                       csatChip = `<span class="chip chip-grey">Sin respuesta</span>`; // valor inesperado
+
+    // NPS chip — Tableau entrega: 100 = Promotor, 0 = Pasivo, -100 = Detractor
+    let npsChip;
+    const cat = npsCategory(t.nps);
+    if      (cat === 'null')      npsChip = `<span class="chip chip-grey">Sin respuesta</span>`;
+    else if (cat === 'promotor')  npsChip = `<span class="chip chip-green">🟢 Promotor</span>`;
+    else if (cat === 'pasivo')    npsChip = `<span class="chip chip-yellow">🟡 Pasivo</span>`;
+    else                          npsChip = `<span class="chip chip-red">🔴 Detractor</span>`;
+
+    // Celda de acciones — eliminar (con confirmación) o restaurar
+    const idSafe = String(t.ticket || '').replace(/[^0-9A-Za-z_-]/g, '');
+    let actionCell;
+    if (!idSafe) {
+      actionCell = `<span style="color:var(--muted-light)">—</span>`;
+    } else if (t.excluded) {
+      actionCell = `
+        <button class="action-btn restore" onclick="askRestore('${idSafe}')" title="Volver a incluir en métricas">↩ Restaurar</button>
+        ${t.excludedBy ? `<div class="excluded-meta">por ${t.excludedBy.split('@')[0]}</div>` : ''}`;
+    } else {
+      actionCell = `<button class="action-btn delete" onclick="askExclude('${idSafe}')" title="Eliminar de las métricas (no es de audiencia B2B)">🗑 Eliminar</button>`;
+    }
+
+    return `<tr${t.excluded ? ' class="row-excluded"' : ''}>
+      <td>
+        ${t.ticket
+          ? `<a href="https://cabify.zendesk.com/agent/tickets/${t.ticket}" target="_blank" rel="noopener"
+               style="font-family:monospace;font-size:12px;font-weight:700;color:var(--purple);text-decoration:none;display:inline-flex;align-items:center;gap:4px;"
+               title="Abrir en Zendesk">
+               #${t.ticket}
+               <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style="opacity:.5;flex-shrink:0">
+                 <path d="M5 2H2a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V7M7 1h4m0 0v4m0-4L5 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+               </svg>
+             </a>`
+          : '<span style="color:var(--muted-light)">—</span>'}
+      </td>
+      <td style="font-weight:700">${t.agent||'<span style="color:var(--muted-light);font-style:italic">Sin asignar</span>'}</td>
+      <td>${csatChip}</td>
+      <td>${npsChip}</td>
+      <td><div class="tag-chain">
+        ${t.tag1?`<span>${t.tag1}</span>`:''}
+        ${t.tag2?`<span class="tag-sep"> › </span><span>${t.tag2}</span>`:''}
+        ${t.tag3?`<span class="tag-sep"> › </span><span style="color:var(--muted-light)">${t.tag3}</span>`:''}
+      </div></td>
+      <td style="color:var(--muted);font-weight:600;white-space:nowrap">${t.week||'—'}</td>
+      <td>${t.autoAnswer?`<span class="auto-tag">${t.autoAnswer}</span>`:''}</td>
+      <td style="text-align:center">${actionCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+//  EXCLUSIÓN / RESTAURACIÓN DE TICKETS
+//  Con modal de confirmación para evitar clics accidentales
+// ═══════════════════════════════════════════════
+function askExclude(id) {
+  pendingAction = { type: 'exclude', id };
+  openModal({
+    icon:    '🗑️',
+    iconCls: 'danger',
+    title:   '¿Eliminar este ticket de las métricas?',
+    text:    `El ticket <span class="ticket-hl">#${id}</span> dejará de contribuir al CSAT, NPS y conteos del dashboard (p. ej., porque no corresponde a la audiencia B2B).<br><br>Esta acción es reversible: podrás restaurarlo desde el filtro <b>Excluidos</b>.`,
+    confirmLabel: 'Sí, eliminar',
+    confirmCls:   'btn-danger'
+  });
+}
+
+function askRestore(id) {
+  pendingAction = { type: 'restore', id };
+  openModal({
+    icon:    '↩️',
+    iconCls: 'success',
+    title:   '¿Restaurar este ticket?',
+    text:    `El ticket <span class="ticket-hl">#${id}</span> volverá a contribuir a las métricas del dashboard.`,
+    confirmLabel: 'Sí, restaurar',
+    confirmCls:   'btn-success'
+  });
+}
+
+function openModal({ icon, iconCls, title, text, confirmLabel, confirmCls }) {
+  const iconEl = document.getElementById('modal-icon');
+  iconEl.textContent = icon;
+  iconEl.className   = 'modal-icon ' + iconCls;
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-text').innerHTML    = text;
+  const err = document.getElementById('modal-error');
+  err.style.display = 'none'; err.textContent = '';
+  const btn = document.getElementById('modal-confirm-btn');
+  btn.textContent = confirmLabel;
+  btn.className   = 'modal-btn ' + confirmCls;
+  btn.disabled    = false;
+  document.getElementById('modal-cancel-btn').disabled = false;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  pendingAction = null;
+}
+
+// Cerrar con Escape
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('modal-overlay').classList.contains('open')) closeModal();
+});
+
+function confirmModalAction() {
+  if (!pendingAction) return;
+  const { type, id } = pendingAction;
+
+  // Estado "procesando" — bloquear botones hasta respuesta del servidor
+  const btn = document.getElementById('modal-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = type === 'exclude' ? 'Eliminando…' : 'Restaurando…';
+  document.getElementById('modal-cancel-btn').disabled = true;
+
+  const onOk = res => {
+    applyLocalChange(type, id, res);
+    closeModal();
+    showToast(type === 'exclude'
+      ? `🗑 Ticket #${id} eliminado de las métricas`
+      : `↩ Ticket #${id} restaurado`);
+  };
+  const onFail = err => {
+    const el = document.getElementById('modal-error');
+    el.style.display = 'block';
+    el.textContent = '❌ ' + (err && err.message ? err.message : err);
+    btn.disabled = false;
+    btn.textContent = type === 'exclude' ? 'Sí, eliminar' : 'Sí, restaurar';
+    document.getElementById('modal-cancel-btn').disabled = false;
+  };
+
+  if (type === 'exclude') {
+    google.script.run.withSuccessHandler(onOk).withFailureHandler(onFail).excludeTicket(id);
+  } else {
+    google.script.run.withSuccessHandler(onOk).withFailureHandler(onFail).restoreTicket(id);
+  }
+}
+
+// Aplica el cambio localmente y recalcula todo sin volver a llamar a Tableau
+function applyLocalChange(type, id, res) {
+  const t = allData.tickets.find(x => String(x.ticket) === String(id));
+  if (t) {
+    t.excluded   = (type === 'exclude');
+    t.excludedBy = (type === 'exclude') ? ((res && res.by) || '') : null;
+    t.excludedAt = (type === 'exclude') ? ((res && res.at) || '') : null;
+  }
+  updateExcludedBanner();
+  buildDerivedPoints();
+  buildPeriodSelect();
+  buildWeekFilter();
+  renderResumen();
+  renderTable();
+}
+
+function updateExcludedBanner() {
+  const n = allData ? allData.tickets.filter(t => t.excluded).length : 0;
+  const el = document.getElementById('excluded-note');
+  if (n > 0) {
+    el.style.display = 'block';
+    el.innerHTML = `🗑 <b>${n} ticket${n!==1?'s':''} excluido${n!==1?'s':''}</b> de las métricas (bandeja incorrecta / no B2B). Puedes revisarlos y restaurarlos en <b>Detalle de tickets → Estado: Excluidos</b>.`;
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+// Cerrar modal al hacer clic en el fondo oscuro
+document.addEventListener('DOMContentLoaded', () => {
+  const ov = document.getElementById('modal-overlay');
+  ov.addEventListener('click', e => {
+    if (e.target === ov && !document.getElementById('modal-confirm-btn').disabled) closeModal();
+  });
+});
+
+window.onload = loadData;
+</script>
+</body>
+</html>
